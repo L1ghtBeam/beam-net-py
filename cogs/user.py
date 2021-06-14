@@ -1,11 +1,11 @@
 import discord
 from discord.ext import commands
 from discord_slash import cog_ext, SlashContext, ComponentContext
-#from discord_slash.utils import manage_commands, manage_components
+from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType
 from discord_slash.utils.manage_components import ButtonStyle, create_actionrow, create_button, wait_for_component
 
 from datetime import datetime
-import json, logging, asyncio
+import json, logging, asyncio, pytz
 
 with open("bot.json", "r") as f:
     bot_data = json.load(f)
@@ -111,7 +111,7 @@ class User(commands.Cog):
         # Registration 3/3
         embed = discord.Embed(
             colour = discord.Colour.blue(),
-            timestamp=datetime.now(),
+            timestamp=datetime.utcnow(),
             title="Please rate your ability to host matches."
         )
 
@@ -143,7 +143,10 @@ class User(commands.Cog):
 
         try:
             # default rating, deviation, and volitility are set as default values in the database
-            await db.execute("INSERT INTO users (user_id, host_pref, register_date) VALUES ($1, $2, $3)", user_id, host_pref, datetime.now()),
+            await db.execute(
+                "INSERT INTO users (user_id, host_pref, register_date) VALUES ($1, $2, $3)",
+                user_id, host_pref, pytz.utc.localize(datetime.utcnow())
+            )
         except:
             await msg.edit(content="You are already registered.", embed=None, components=None)
             return
@@ -152,6 +155,49 @@ class User(commands.Cog):
             ctx.author.add_roles(role),
             msg.edit(content="You have been successfully registered. You may now use Beam Net.", embed=None, components=None)
         )
+    
+    @cog_ext.cog_slash(
+        name="user",
+        description="Get info about a user.",
+        options=[
+            create_option(
+                name="user",
+                description="User to get info from.",
+                option_type=SlashCommandOptionType.USER,
+                required=False,
+            ),
+        ],
+        guild_ids=bot_data['guild_ids'],
+    )
+    async def user(self, ctx: SlashContext, user: discord.Member = None):
+        if not user:
+            user = ctx.author
+        
+        user_data = await self.bot.pg_con.fetchrow("SELECT * FROM users WHERE user_id = $1", user.id)
+        if not user_data:
+            await ctx.send(f"{user} is not registered!", hidden=True)
+
+        embed = discord.Embed(
+            colour = user.color,
+            timestamp=datetime.utcnow(),
+            title=f"{user.name}'s User Card",
+        )
+
+        embed.set_thumbnail(url=user.avatar_url)
+
+        def date_to_string(date: datetime):
+            if date:
+                return date.strftime("%x")
+            else:
+                return "Never"
+
+        rating = format(user_data['rating'], '.1f')
+
+        embed.add_field(name="Rating", value=str(rating))
+        embed.add_field(name="Last Played", value=date_to_string(user_data['last_played']))
+        embed.add_field(name="Register Date", value=date_to_string(user_data['register_date']))
+
+        await ctx.send(embed=embed)
 
 
 def setup(bot):
