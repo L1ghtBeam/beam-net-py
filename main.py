@@ -36,8 +36,6 @@ bot = commands.Bot(
 )
 slash = SlashCommand(bot, sync_commands=False, sync_on_cog_reload=False)
 
-bot.GUILD_IDS = bot_data['guild_ids']
-
 async def create_db_pool():
     bot.pg_con = await asyncpg.create_pool(host=bot_data['address'], port=DB_PORT, database=bot_data['name'], user='postgres', password=bot_data['pass'])
 

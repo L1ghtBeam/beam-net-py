@@ -19,7 +19,7 @@ class User(commands.Cog):
     @cog_ext.cog_slash(
         name="register",
         description="Sign up to participate in Beam Net.",
-        guild_ids=bot_data['guild_ids']
+        guild_ids=[bot_data['guild_id']]
     )
     async def register(self, ctx: SlashContext):
         
@@ -167,7 +167,7 @@ class User(commands.Cog):
                 required=False,
             ),
         ],
-        guild_ids=bot_data['guild_ids'],
+        guild_ids=[bot_data['guild_id']],
     )
     async def user(self, ctx: SlashContext, user: discord.Member = None):
         if not user:
