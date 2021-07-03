@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord.mentions import AllowedMentions
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType
 from discord_slash.utils.manage_components import ButtonStyle, create_actionrow, create_button, wait_for_component
@@ -30,7 +31,7 @@ class Modes(commands.Cog):
         )
         messages = gather[0]
         modes = gather[1]
-        change = len(modes) - len(messages)
+        change = len(modes) - len(messages) + 1
 
         # create or delete messages
         if change > 0:
@@ -69,6 +70,17 @@ class Modes(commands.Cog):
                 label = "Temporarily Unavailable"
                 style = ButtonStyle.green
 
+            if mode['status'] in (1, 2):
+                embed.add_field(
+                    name="Searching",
+                    value="`0` 🔎"
+                )
+
+                embed.add_field(
+                    name="In-game",
+                    value="`0` 🆚"
+                )
+
             b1 = create_button(style=style, label=label, custom_id=f"mode_join_{mode['internal_name']}", disabled=disabled)
             b2 = create_button(style=ButtonStyle.red, label="Leave Queue", custom_id=f"mode_leave_{mode['internal_name']}", disabled=False)
 
@@ -77,8 +89,36 @@ class Modes(commands.Cog):
             else:
                 components = [create_actionrow(b1)]
 
-            await messages[i].edit(content=None, embed=embed, components=components)
+            asyncio.create_task(
+                messages[i].edit(content=None, embed=embed, components=components)
+            )
             i += 1
+        
+        embed = discord.Embed(
+            colour = discord.Colour.blue(),
+            title="Info",
+            description="Modes are listed below. Multiple modes can be queued for at the same time. If you are on mobile, please scroll down after clicking any button."
+        )
+        embed.set_thumbnail(url="https://i.imgur.com/YmTNuR5.png")
+
+        components = [
+            create_actionrow(
+                create_button(
+                    style=ButtonStyle.blue,
+                    label="View joined queues",
+                    custom_id="list_joined_modes"
+                ),
+                create_button(
+                    style=ButtonStyle.red,
+                    label="Leave all queues",
+                    custom_id="leave_all_modes"
+                )
+            )
+        ]
+
+        asyncio.create_task(
+            messages[i].edit(content=None, embed=embed, components=components)
+        )
 
     @update_modes.before_loop
     async def before_update_modes(self):
@@ -117,6 +157,13 @@ class Modes(commands.Cog):
         
         # TODO: add joining and leaving queue functionality
 
+    @cog_ext.cog_component()
+    async def list_joined_modes(self, ctx: ComponentContext):
+        await ctx.send(f"You are not in any queues!", hidden=True, allowed_mentions=AllowedMentions.all())
+    
+    @cog_ext.cog_component()
+    async def leave_all_modes(self, ctx: ComponentContext):
+        await ctx.send(f"Left all queues.", hidden=True)
 
 def setup(bot):
     bot.add_cog(Modes(bot))

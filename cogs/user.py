@@ -142,7 +142,6 @@ class User(commands.Cog):
         host_pref = 3 - int(button_ctx.custom_id)
 
         try:
-            # default rating, deviation, and volitility are set as default values in the database
             await db.execute(
                 "INSERT INTO users (user_id, host_pref, register_date) VALUES ($1, $2, $3)",
                 user_id, host_pref, pytz.utc.localize(datetime.utcnow())
