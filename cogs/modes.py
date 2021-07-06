@@ -6,7 +6,7 @@ from discord_slash.utils.manage_commands import create_option, SlashCommandOptio
 from discord_slash.utils.manage_components import ButtonStyle, create_actionrow, create_button, wait_for_component
 
 from datetime import datetime
-import json, logging, asyncio
+import json, logging, asyncio, pytz
 
 with open("bot.json", "r") as f:
     bot_data = json.load(f)
@@ -20,6 +20,61 @@ class Modes(commands.Cog):
 
     def cog_unload(self):
         self.update_modes.cancel()
+
+    async def join_queue(self, ctx: ComponentContext, internal_name):
+        mode = await self.bot.pg_con.fetchrow("SELECT name, status FROM modes WHERE internal_name = $1", internal_name)
+        if not mode:
+            logging.error(f"Mode {internal_name} not found! Button {ctx.custom_id} was clicked.")
+            await ctx.send("Mode not found!", hidden=True) 
+            return
+        
+        if mode['status'] == 0:
+            await ctx.send(f"**{mode['name']}** is currently unavailable.", hidden=True)
+        elif mode['status'] == 2:
+            await ctx.send(f"**{mode['name']}** is temporarily unavailable.", hidden=True)
+        
+        # TODO: Check if player is in party. If they are, prevent the player from joining if they are not the party leader.
+        # If they are the leader, add their entire team to the queue
+
+        queue = await self.bot.pg_con.fetchrow(
+            "SELECT * FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
+            ctx.author_id, internal_name
+        )
+        if queue:
+            await ctx.send(f"You are already in queue for **{mode['name']}**.", hidden=True)
+            return
+        
+        try:
+            await self.bot.pg_con.execute(
+                "INSERT INTO queue (mode, player_count, player_ids, ratings, deviations, volatilities, join_date) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                internal_name, 1, [ctx.author_id], [1500], [350], [0.06], pytz.utc.localize(datetime.utcnow()) # TODO: use the player's actual rating
+            )
+        except Exception as error:
+            logging.exception("Join queue error!", exc_info=error)
+            await ctx.send(f"There was an error joining **{mode['name']}**.", hidden=True)
+        else:
+            await ctx.send(f"Joined the queue for **{mode['name']}**.", hidden=True)
+
+    async def leave_queue(self, ctx: ComponentContext, internal_name):
+        mode = await self.bot.pg_con.fetchrow("SELECT name, status FROM modes WHERE internal_name = $1", internal_name)
+        if not mode:
+            logging.error(f"Mode {internal_name} not found! Button {ctx.custom_id} was clicked.")
+            await ctx.send("Mode not found!", hidden=True) 
+            return
+
+        result = await self.bot.pg_con.execute(
+            "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
+            ctx.author_id, internal_name
+        )
+        if result == "DELETE 1":
+            await ctx.send(f"Left the queue for **{mode['name']}**.", hidden=True)
+        elif result == "DELETE 0":
+            await ctx.send(f"You were not in queue for **{mode['name']}**.", hidden=True)
+        else:
+            logging.error(f"Result \"{result}\" received when leaving {mode['internal_name']}!")
+            await ctx.send(f"Left the queue for **{mode['name']}**.", hidden=True)
+
+        # TODO: leaving functionality
 
     @tasks.loop(seconds=30.0)
     async def update_modes(self):
@@ -105,12 +160,12 @@ class Modes(commands.Cog):
             create_actionrow(
                 create_button(
                     style=ButtonStyle.blue,
-                    label="View joined queues",
+                    label="View Joined Queues",
                     custom_id="list_joined_modes"
                 ),
                 create_button(
                     style=ButtonStyle.red,
-                    label="Leave all queues",
+                    label="Leave All Queues",
                     custom_id="leave_all_modes"
                 )
             )
@@ -132,28 +187,10 @@ class Modes(commands.Cog):
     @commands.Cog.listener()
     async def on_component(self, ctx: ComponentContext):
         if ctx.custom_id[:9] == "mode_join":
-            internal_name = ctx.custom_id[10:]
-            mode = await self.bot.pg_con.fetchrow("SELECT name, status FROM modes WHERE internal_name = $1", internal_name)
-            if not mode:
-                logging.error(f"Mode {internal_name} not found! Button {ctx.custom_id} was clicked.")
-                await ctx.send("Mode not found!", hidden=True) 
-                return
-            
-            if mode['status'] == 1:
-                await ctx.send(f"Joined queue for **{mode['name']}**.", hidden=True)
-            elif mode['status'] == 0:
-                await ctx.send(f"**{mode['name']}** is currently unavailable.", hidden=True)
-            else:
-                await ctx.send(f"**{mode['name']}** is temporarily unavailable.", hidden=True)
+            await self.join_queue(ctx, ctx.custom_id[10:])
 
         elif ctx.custom_id[:10] == "mode_leave":
-            internal_name = ctx.custom_id[11:]
-            mode = await self.bot.pg_con.fetchrow("SELECT name, status FROM modes WHERE internal_name = $1", internal_name)
-            if not mode:
-                logging.error(f"Mode {internal_name} not found! Button {ctx.custom_id} was clicked.")
-                await ctx.send("Mode not found!", hidden=True) 
-                return
-            await ctx.send(f"Left the queue for **{mode['name']}**.", hidden=True)
+            await self.leave_queue(ctx, ctx.custom_id[11:])
         
         # TODO: add joining and leaving queue functionality
 
