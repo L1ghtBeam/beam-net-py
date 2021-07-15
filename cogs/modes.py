@@ -22,33 +22,44 @@ class Modes(commands.Cog):
         self.update_modes.cancel()
 
     async def join_queue(self, ctx: ComponentContext, internal_name):
-        mode = await self.bot.pg_con.fetchrow("SELECT name, status FROM modes WHERE internal_name = $1", internal_name)
-        if not mode:
-            logging.error(f"Mode {internal_name} not found! Button {ctx.custom_id} was clicked.")
-            await ctx.send("Mode not found!", hidden=True) 
-            return
-        
-        if mode['status'] == 0:
-            await ctx.send(f"**{mode['name']}** is currently unavailable.", hidden=True)
-        elif mode['status'] == 2:
-            await ctx.send(f"**{mode['name']}** is temporarily unavailable.", hidden=True)
-        
-        # TODO: Check if player is in party. If they are, prevent the player from joining if they are not the party leader.
-        # If they are the leader, add their entire team to the queue
-
-        queue = await self.bot.pg_con.fetchrow(
-            "SELECT * FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
-            ctx.author_id, internal_name
-        )
-        if queue:
-            await ctx.send(f"You are already in queue for **{mode['name']}**.", hidden=True)
-            return
-        
         try:
+            mode = await self.bot.pg_con.fetchrow("SELECT name, status FROM modes WHERE internal_name = $1", internal_name)
+            if not mode:
+                logging.error(f"Mode {internal_name} not found! Button {ctx.custom_id} was clicked.")
+                await ctx.send("Mode not found!", hidden=True) 
+                return
+            
+            if mode['status'] == 0:
+                await ctx.send(f"**{mode['name']}** is currently unavailable.", hidden=True)
+            elif mode['status'] == 2:
+                await ctx.send(f"**{mode['name']}** is temporarily unavailable.", hidden=True)
+            
+            # TODO: Check if player is in party. If they are, prevent the player from joining if they are not the party leader.
+            # If they are the leader, add their entire team to the queue
+
+            queue = await self.bot.pg_con.fetchrow(
+                "SELECT * FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
+                ctx.author_id, internal_name
+            )
+            if queue:
+                await ctx.send(f"You are already in queue for **{mode['name']}**.", hidden=True)
+                return
+            
+            ratings = await self.bot.pg_con.fetchrow(
+                "SELECT * FROM ratings WHERE user_id = $1 AND mode = $2",
+                ctx.author_id, internal_name
+            )
+            if not ratings:
+                ratings = await self.bot.pg_con.fetchrow(
+                    "INSERT INTO ratings (user_id, mode, rating, deviation, volatility) VALUES ($1, $2, $3, $4, $5) RETURNING rating, deviation, volatility",
+                    ctx.author_id, internal_name, 1500.0, 350.0, 0.06
+                )
+
             await self.bot.pg_con.execute(
                 "INSERT INTO queue (mode, player_count, player_ids, ratings, deviations, volatilities, join_date) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                internal_name, 1, [ctx.author_id], [1500], [350], [0.06], pytz.utc.localize(datetime.utcnow()) # TODO: use the player's actual rating
+                internal_name, 1, [ctx.author_id], [ratings['rating']], [ratings['deviation']], [ratings['volatility']], pytz.utc.localize(datetime.utcnow())
             )
+
         except Exception as error:
             logging.exception("Join queue error!", exc_info=error)
             await ctx.send(f"There was an error joining **{mode['name']}**.", hidden=True)
