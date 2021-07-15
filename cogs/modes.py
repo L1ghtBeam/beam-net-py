@@ -8,6 +8,7 @@ from discord_slash.utils.manage_components import ButtonStyle, create_actionrow,
 from datetime import datetime
 import json, logging, asyncio, pytz
 
+ICON_URL = "https://i.imgur.com/YmTNuR5.png"
 with open("bot.json", "r") as f:
     bot_data = json.load(f)
 
@@ -85,9 +86,7 @@ class Modes(commands.Cog):
             logging.error(f"Result \"{result}\" received when leaving {mode['internal_name']}!")
             await ctx.send(f"Left the queue for **{mode['name']}**.", hidden=True)
 
-        # TODO: leaving functionality
-
-    @tasks.loop(seconds=30.0)
+    @tasks.loop(seconds=15.0)
     async def update_modes(self):
         channel = discord.utils.get(self.bot.get_all_channels(), guild__id=bot_data['guild_id'], name='modes')
 
@@ -137,14 +136,20 @@ class Modes(commands.Cog):
                 style = ButtonStyle.green
 
             if mode['status'] in (1, 2):
+                queue = await self.bot.pg_con.fetch(
+                    "SELECT * FROM queue WHERE mode = $1",
+                    mode['internal_name']
+                )
+                player_count = len(queue)
+
                 embed.add_field(
                     name="Searching",
-                    value="`0` 🔎"
+                    value=f"`{player_count}` 🔎"
                 )
 
                 embed.add_field(
                     name="In-game",
-                    value="`0` 🆚"
+                    value=f"`0` 🆚"
                 )
 
             b1 = create_button(style=style, label=label, custom_id=f"mode_join_{mode['internal_name']}", disabled=disabled)
@@ -165,7 +170,7 @@ class Modes(commands.Cog):
             title="Info",
             description="Modes are listed below. Multiple modes can be queued for at the same time. If you are on mobile, please scroll down after clicking any button."
         )
-        embed.set_thumbnail(url="https://i.imgur.com/YmTNuR5.png")
+        embed.set_thumbnail(url=ICON_URL)
 
         components = [
             create_actionrow(
@@ -202,16 +207,40 @@ class Modes(commands.Cog):
 
         elif ctx.custom_id[:10] == "mode_leave":
             await self.leave_queue(ctx, ctx.custom_id[11:])
-        
-        # TODO: add joining and leaving queue functionality
 
     @cog_ext.cog_component()
     async def list_joined_modes(self, ctx: ComponentContext):
-        await ctx.send(f"You are not in any queues!", hidden=True, allowed_mentions=AllowedMentions.all())
+        queue = await self.bot.pg_con.fetch(
+            "SELECT mode, player_ids FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+            ctx.author_id
+        )
+        if not queue:
+            await ctx.send(f"You are not in any queues!", hidden=True)
+        else:
+            modes = await self.bot.pg_con.fetch(
+                "SELECT internal_name, name FROM modes",
+            )   
+            content = "You are currently in queue for:"
+            for queue_mode in queue:
+                for mode in modes:
+                    if mode['internal_name'] == queue_mode['mode']:
+                        content += f"\n**{mode['name']}**"
+                        break
+            await ctx.send(content=content, hidden=True)
     
     @cog_ext.cog_component()
     async def leave_all_modes(self, ctx: ComponentContext):
-        await ctx.send(f"Left all queues.", hidden=True)
+        result = await self.bot.pg_con.execute(
+            "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+            ctx.author_id
+        )
+        num = result[7:]
+        if num == "0":
+            await ctx.send("You are not in a queue!", hidden=True)
+        elif num == "1":
+            await ctx.send(f"Left `{num}` queue.", hidden=True)
+        else:
+            await ctx.send(f"Left `{num}` queues.", hidden=True)
 
 def setup(bot):
     bot.add_cog(Modes(bot))
