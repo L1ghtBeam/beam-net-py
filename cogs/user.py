@@ -1,8 +1,9 @@
 import discord
 from discord.ext import commands
 from discord_slash import cog_ext, SlashContext, ComponentContext
-from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType
+from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
 from discord_slash.utils.manage_components import ButtonStyle, create_actionrow, create_button, wait_for_component
+from discord_slash.model import SlashCommandPermissionType
 
 from datetime import datetime
 import json, logging, asyncio, pytz
@@ -19,6 +20,11 @@ class User(commands.Cog):
     @cog_ext.cog_slash(
         name="register",
         description="Sign up to participate in Beam Net.",
+        permissions={
+            bot_data['guild_id']: [
+                create_permission(800274945682309120, SlashCommandPermissionType.ROLE, False) # TODO: use a variable for the registered role
+            ],
+        },
         guild_ids=[bot_data['guild_id']]
     )
     async def register(self, ctx: SlashContext):
@@ -165,16 +171,23 @@ class User(commands.Cog):
                 option_type=SlashCommandOptionType.USER,
                 required=False,
             ),
+            create_option(
+                name="hidden",
+                description="Hide the user card when viewed. Default is false.",
+                option_type=SlashCommandOptionType.BOOLEAN,
+                required=False
+            )
         ],
         guild_ids=[bot_data['guild_id']],
     )
-    async def user(self, ctx: SlashContext, user: discord.Member = None):
+    async def user(self, ctx: SlashContext, user: discord.Member = None, hidden: bool = False):
         if not user:
             user = ctx.author
         
         user_data = await self.bot.pg_con.fetchrow("SELECT * FROM users WHERE user_id = $1", user.id)
         if not user_data:
             await ctx.send(f"{user} is not registered!", hidden=True)
+            return
 
         embed = discord.Embed(
             colour = user.color,
@@ -184,19 +197,36 @@ class User(commands.Cog):
 
         embed.set_thumbnail(url=user.avatar_url)
 
+        rating_data = await self.bot.pg_con.fetch(
+            "SELECT user_id, mode, rating, deviation FROM ratings WHERE user_id = $1 ORDER BY rating DESC",
+            user_data['user_id']
+        )
+
+        if not rating_data:
+            value = "None"
+        else:
+            value = ""
+            modes = await self.bot.pg_con.fetch(
+                "SELECT internal_name, name FROM modes",
+            )  
+            for rating in rating_data:
+                for mode in modes:
+                    if mode['internal_name'] == rating['mode']:
+                        value += f"\n{mode['name']} - `{'{:.1f}'.format(rating['rating'])}`"
+                        break
+        
+        embed.add_field(name="Ratings", value=value, inline=False)
+
         def date_to_string(date: datetime):
             if date:
                 return date.strftime("%x")
             else:
                 return "Never"
 
-        rating = format(user_data['rating'], '.1f')
-
-        embed.add_field(name="Rating", value=str(rating))
         embed.add_field(name="Last Played", value=date_to_string(user_data['last_played']))
         embed.add_field(name="Register Date", value=date_to_string(user_data['register_date']))
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, hidden=hidden)
 
 
 def setup(bot):
