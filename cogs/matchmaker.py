@@ -157,35 +157,18 @@ class Matchmaker(commands.Cog):
             custom_id="set_host"
         )
 
-        # content and components
-        def generate_components(start_disabled):
-            start_button = create_button(
-                style=ButtonStyle.green,
-                label="Create Match",
-                disabled=start_disabled,
-                custom_id="start_game"
-            )
-
-            return spread_to_rows(mode_select, host_select, start_button)
+        # regular start button
+        start_button = create_button(
+            style=ButtonStyle.green,
+            label="Create Match",
+            custom_id="start_game"
+        )
         
-        def generate_content(ctx, mode, host):
-            content = "Please choose a mode and a host for the match."
-            if mode:
-                content += f"\nMode: `{mode}`"
-            else:
-                content += "\nMode: `none`"
-
-            if host:
-                member = discord.utils.get(ctx.guild.members, id=host)
-                content += f"\nHost: `{member}`"
-            else:
-                content += "\nHost: `none`"
-            return content
-
+        content = "Please choose a mode and a host for the match."
         mode = None
         host = None
 
-        msg = await ctx.send(content=generate_content(ctx, mode, host), components=generate_components(True))
+        msg = await ctx.send(content=content, components=spread_to_rows(mode_select, host_select, start_button))
         
         while True:
             try:
@@ -194,19 +177,28 @@ class Matchmaker(commands.Cog):
                 await msg.edit(content="Took too long! Please try again.", components=None)
                 return
             
-            if component_ctx.custom_id == "set_mode":
+            if not ctx.author_id == component_ctx.author_id:
+                await component_ctx.send("You cannot interact with this message!", hidden=True)
+                continue
+
+            elif component_ctx.custom_id == "set_mode":
                 mode = component_ctx.selected_options[0]
+                await component_ctx.send(f"Mode set to `{mode}`.", hidden=True)
 
             elif component_ctx.custom_id == "set_host":
                 host = int(component_ctx.selected_options[0])
-                
-            elif component_ctx.custom_id == "start_game":
-                await msg.edit(content="Starting the match!", components=None)
-                logging.info("Starting a match!") # TODO: start match here
-                break
+                member = discord.utils.get(ctx.guild.members, id=host)
+                await component_ctx.send(f"Host set to `{member}`.", hidden=True)
 
-            ready = mode is None or host is None
-            await component_ctx.edit_origin(content=generate_content(ctx, mode, host), components=generate_components(False))
+            elif component_ctx.custom_id == "start_game":
+                ready = not (mode is None or host is None)
+                if not ready:
+                    await component_ctx.send("Please select a mode and a host!", hidden=True)
+                else:
+                    member = discord.utils.get(ctx.guild.members, id=host)
+                    await msg.edit(content=f"Starting the match!\nMode: `{mode}`\nHost: `{member}`", components=None)
+                    logging.info("Starting a match!") # TODO: start match here
+                    break
 
 
 def setup(bot):
