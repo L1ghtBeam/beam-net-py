@@ -22,7 +22,7 @@ class User(commands.Cog):
         description="Sign up to participate in Beam Net.",
         permissions={
             bot_data['guild_id']: [
-                create_permission(800274945682309120, SlashCommandPermissionType.ROLE, False) # TODO: use a variable for the registered role
+                create_permission(bot_data['registered_id'], SlashCommandPermissionType.ROLE, False) # TODO: use a variable for the registered role
             ],
         },
         guild_ids=[bot_data['guild_id']]
