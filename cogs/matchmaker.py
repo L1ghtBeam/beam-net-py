@@ -105,32 +105,6 @@ class Matchmaker(commands.Cog):
                 logging.info("Not all players hit ready!")
                 # notify players in group of player who didn't ready
                 # also remove them from queue
-                for i in range(len(players_ready)): # TODO: UNFINISHED CODE THAT I WILL REWORK
-                    if not players_ready[i]: # if the player didn't ready
-                        group_players = await self.bot.pg_con.fetchrow( # get all players in their group
-                            "SELECT player_ids, mode FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
-                            players[i].id, mode
-                        )
-                        if len(group_players) == 1:
-                            member = players[i]
-                            self.send_info_message(member, f"You did not accept the match and have been removed from queue!")
-                        else:
-                            for player in group_players: # for all the players their group
-                                if player == players[i].id:
-                                    member = players[i]
-                                    asyncio.create_task(
-                                        self.send_info_message(member, f"You did not accept the match and your group has been removed from queue!")
-                                    )
-                                else:
-                                    member = grab_player(player)
-                                    asyncio.create_task(
-                                        self.send_info_message(member, f"{member} did not accept the match and your group has been removed from queue!")
-                                    )
-                        await self.bot.pg_con.execute(
-                            "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
-                            players[i].id
-                        )
-
                 return False
             else:
                 logging.info("Create a game here!")
