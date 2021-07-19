@@ -101,13 +101,45 @@ class Matchmaker(commands.Cog):
                     if player.id == user_id:
                         return player
 
+            coroutines = []
             if False in players_ready:
                 logging.info("Not all players hit ready!")
-                # notify players in group of player who didn't ready
-                # also remove them from queue
+                for i in range(len(players_ready)):
+                    if not players_ready[i]:
+                        coroutines.append(
+                            self.send_info_message(players[i], "You did not accept the match and have been removed from the queue!"), #TODO: send different messages for groups
+                        )
+                        coroutines.append(
+                            self.bot.pg_con.execute(
+                                "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+                                players[i].id
+                            )
+                        )
+                    else:
+                        coroutines.append(
+                            self.send_info_message(players[i], "A player did not accept the match."), #TODO: send different messages for groups
+                        )
+                        coroutines.append(
+                            self.bot.pg_con.execute(
+                                "UPDATE queue SET available = true WHERE $1 = ANY (player_ids::bigint[])",
+                                players[i].id
+                            )
+                        )
+                await asyncio.gather(*coroutines)
                 return False
             else:
                 logging.info("Create a game here!")
+                for player in players:
+                    coroutines.append(
+                        self.send_info_message(player, "All players accepted. Creating the match."),
+                    )
+                    coroutines.append(
+                        self.bot.pg_con.execute(
+                                "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+                                player.id
+                        )
+                    )
+                await asyncio.gather(*coroutines)
                 return True
 
         except Exception as error:
