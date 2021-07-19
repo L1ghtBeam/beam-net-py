@@ -1,11 +1,13 @@
 import discord
 from discord.ext import commands
+from discord.ext.commands.core import group
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
 from discord_slash.utils.manage_components import create_select, create_select_option, spread_to_rows, create_button, wait_for_component
 from discord_slash.model import SlashCommandPermissionType, ButtonStyle, ComponentType
 
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import json, logging, asyncio, pytz
 
 with open("bot.json", "r") as f:
@@ -16,6 +18,127 @@ class Matchmaker(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
+    async def send_ready_message(self, player: discord.User, mode):
+        channel = player.dm_channel
+        if not channel:
+            channel = await player.create_dm()
+        
+        def generate_components(disabled, style):
+            return spread_to_rows(
+                create_button(
+                    style=style,
+                    label="Accept",
+                    disabled=disabled
+                )
+            )
+
+        embed = discord.Embed(
+            colour = discord.Colour.blue(),
+            title="Your match is ready!",
+            description=f"Mode: __{mode['name']}__",
+            timestamp=datetime.utcnow(),
+        )
+        if mode['thumbnail']:
+            embed.set_thumbnail(url=mode['thumbnail'])
+        
+        embed.add_field(name="You have **20 seconds** to accept the match.", value="Do not accept the match if you cannot play for up to 45 minutes.")
+
+        msg = await channel.send(embed=embed, components=generate_components(False, ButtonStyle.green))
+
+        try:
+            comp_ctx = await wait_for_component(self.bot, msg, timeout=20.0)
+        except asyncio.TimeoutError:
+            await msg.edit(embed=embed, components=generate_components(True, ButtonStyle.red))
+            return False
+        else:
+            await comp_ctx.edit_origin(embed=embed, components=generate_components(True, ButtonStyle.green))
+            return True
+
+    async def send_info_message(self, player: discord.User, content):
+        channel = player.dm_channel
+        if not channel:
+            channel = await player.create_dm()
+
+        await channel.send(content=content)
+
+    # Alpha are the first 4 players, Bravo are the last 4
+    # can include only 2 players for testing
+    async def create_match(self, players: list[discord.User], mode: str, host: discord.User):
+        try:
+            two_players = True if len(players) == 2 else False
+
+            # get name and thumbnail of the mode to send to players
+            mode_data = await self.bot.pg_con.fetchrow(
+                "SELECT name, internal_name, thumbnail FROM modes WHERE internal_name = $1",
+                mode
+            )
+
+            coroutines = []
+            ready_coroutines = []
+            for player in players:
+                coroutines.append(
+                    self.bot.pg_con.execute(
+                        "UPDATE users SET queue_disable_time = $2 WHERE user_id = $1",
+                        player.id, pytz.utc.localize(datetime.utcnow())+relativedelta(seconds=+25)
+                    )
+                )
+                coroutines.append(
+                    self.bot.pg_con.execute(
+                        "UPDATE queue SET available = false WHERE $1 = ANY (player_ids::bigint[]) AND available = true",
+                        player.id
+                    )
+                )
+                ready_coroutines.append(
+                    self.send_ready_message(player, mode_data)
+                )
+
+            await asyncio.gather(*coroutines) # mark players as not available in queue and prevent them from re-queueing
+            players_ready = await asyncio.gather(*ready_coroutines) # send ready message to all players and wait for all responces
+
+            def grab_player(user_id):
+                for player in players:
+                    if player.id == user_id:
+                        return player
+
+            if False in players_ready:
+                logging.info("Not all players hit ready!")
+                # notify players in group of player who didn't ready
+                # also remove them from queue
+                for i in range(len(players_ready)): # TODO: UNFINISHED CODE THAT I WILL REWORK
+                    if not players_ready[i]: # if the player didn't ready
+                        group_players = await self.bot.pg_con.fetchrow( # get all players in their group
+                            "SELECT player_ids, mode FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
+                            players[i].id, mode
+                        )
+                        if len(group_players) == 1:
+                            member = players[i]
+                            self.send_info_message(member, f"You did not accept the match and have been removed from queue!")
+                        else:
+                            for player in group_players: # for all the players their group
+                                if player == players[i].id:
+                                    member = players[i]
+                                    asyncio.create_task(
+                                        self.send_info_message(member, f"You did not accept the match and your group has been removed from queue!")
+                                    )
+                                else:
+                                    member = grab_player(player)
+                                    asyncio.create_task(
+                                        self.send_info_message(member, f"{member} did not accept the match and your group has been removed from queue!")
+                                    )
+                        await self.bot.pg_con.execute(
+                            "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+                            players[i].id
+                        )
+
+                return False
+            else:
+                logging.info("Create a game here!")
+                return True
+
+        except Exception as error:
+            logging.exception("Create match error!", exc_info=error)
+            return
 
     @cog_ext.cog_subcommand(
         base="match",
@@ -178,7 +301,9 @@ class Matchmaker(commands.Cog):
                 return
             
             if not ctx.author_id == component_ctx.author_id:
-                await component_ctx.send("You cannot interact with this message!", hidden=True)
+                asyncio.create_task(
+                    component_ctx.send("You cannot interact with this message!", hidden=True)
+                )
                 continue
 
             elif component_ctx.custom_id == "set_mode":
@@ -198,6 +323,7 @@ class Matchmaker(commands.Cog):
                     member = discord.utils.get(ctx.guild.members, id=host)
                     await msg.edit(content=f"Starting the match!\nMode: `{mode}`\nHost: `{member}`", components=None)
                     logging.info("Starting a match!") # TODO: start match here
+                    await self.create_match(players, mode, member)
                     break
 
 

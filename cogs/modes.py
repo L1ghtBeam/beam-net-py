@@ -38,6 +38,21 @@ class Modes(commands.Cog):
             # TODO: Check if player is in party. If they are, prevent the player from joining if they are not the party leader.
             # If they are the leader, add their entire team to the queue
 
+            # check if queue_disable_time has passed or not
+            user = await self.bot.pg_con.fetchrow(
+                "SELECT user_id, queue_disable_time FROM users WHERE user_id = $1",
+                ctx.author_id
+            )
+            if user['queue_disable_time']:
+                if pytz.utc.localize(datetime.utcnow()) < user['queue_disable_time']:
+                    await ctx.send("You cannot join the queue at this time!", hidden=True)
+                    return
+                else:
+                    await self.bot.pg_con.execute(
+                        "UPDATE users SET queue_disable_time = $2 WHERE user_id = $1",
+                        ctx.author_id, None
+                    )
+
             queue = await self.bot.pg_con.fetchrow(
                 "SELECT * FROM queue WHERE $1 = ANY (player_ids::bigint[]) AND mode = $2",
                 ctx.author_id, internal_name
