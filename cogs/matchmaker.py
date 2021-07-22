@@ -62,6 +62,117 @@ class Matchmaker(commands.Cog):
 
         await channel.send(content=content)
 
+    async def initialize_match(self, players: list[discord.User], mode: str, host: discord.user):
+        # split the players
+        if not len(players) == 2: # TODO: Remove later once testing with two is no longer needed
+            alpha = players[:4]
+            bravo = players[4:]
+        else:
+            alpha = players[:1]
+            bravo = players[1:]
+        
+        # put the host on alpha if they are on bravo
+        if host in bravo:
+            alpha, bravo = bravo, alpha
+        
+        # move host to start of the list
+        alpha.remove(host)
+        alpha.insert(0, host)
+
+        # convert to ids
+        alpha_players = []
+        for player in alpha:
+            alpha_players.append(player.id)
+
+        bravo_players = []
+        for player in bravo:
+            bravo_players.append(player.id)
+        
+        host_id = host.id
+
+        # grab rating info
+        async def grab_player_data(player): # TODO: make this a util function since it's directly copied from modes.py
+            ratings = await self.bot.pg_con.fetchrow(
+                    "SELECT user_id, mode, rating, deviation, volatility FROM ratings WHERE user_id = $1 AND mode = $2",
+                    player.id, mode
+                )
+            if not ratings:
+                ratings = await self.bot.pg_con.fetchrow(
+                    "INSERT INTO ratings (user_id, mode, rating, deviation, volatility) VALUES ($1, $2, $3, $4, $5) RETURNING rating, deviation, volatility",
+                    player.id, mode, 1500.0, 350.0, 0.06
+                )
+            return ratings
+
+        alpha_ratings = []
+        alpha_deviations = []
+        alpha_volatilities = []
+
+        for player in alpha:
+            p_data = await grab_player_data(player)
+            alpha_ratings.append(p_data['rating'])
+            alpha_deviations.append(p_data['deviation'])
+            alpha_volatilities.append(p_data['volatility'])
+        
+        bravo_ratings = []
+        bravo_deviations = []
+        bravo_volatilities = []
+
+        for player in bravo:
+            p_data = await grab_player_data(player)
+            bravo_ratings.append(p_data['rating'])
+            bravo_deviations.append(p_data['deviation'])
+            bravo_volatilities.append(p_data['volatility'])
+
+        # generate maps
+        game_maps = []
+        game_modes = []
+
+        # create the database once all data is gathered
+        # id, alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
+        game_data = await self.bot.pg_con.fetchrow(
+            """INSERT INTO games (alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
+            VALUES ($1, $2, $3, $4, $5, $6, false, '{0, 0, 0, 0, 0}', $7, $8, $9, $10, $11, $12, $13) RETURNING id""",
+            alpha_players, bravo_players, mode, host_id, game_maps, game_modes, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
+        )
+
+        # build the channels
+        guild = discord.utils.get(self.bot.guilds, id=bot_data['guild_id'])
+        template_category = discord.utils.get(guild.categories, name="match template")
+
+        reason = f"Creating game #{game_data['id']}."
+
+        category = await template_category.clone(name=f"match #{game_data['id']}", reason=reason)
+        coroutines = []
+        for channel in template_category.channels:
+            coroutines.append(
+                channel.clone(reason=reason)
+            )
+        channels = await asyncio.gather(*coroutines)
+
+        # move
+        for channel in channels:
+            await channel.move(category=category, end=True, reason=reason)
+        
+        # move and set permissions
+        async def set_text_perms(channel, players):
+            for player in players:
+                await channel.set_permissions(player, view_channel=True)
+
+        async def set_voice_perms(channel, players):
+            for player in players:
+                await channel.set_permissions(player, view_channel=True, connect=True)
+
+        await asyncio.gather(
+            set_text_perms(channels[0], alpha + bravo),
+            set_text_perms(channels[1], alpha),
+            set_text_perms(channels[2], bravo),
+            set_voice_perms(channels[3], alpha),
+            set_voice_perms(channels[4], bravo),
+        )
+
+        logging.info("Send messages here")
+
+
     # Alpha are the first 4 players, Bravo are the last 4
     # can include only 2 players for testing
     async def create_match(self, players: list[discord.User], mode: str, host: discord.User):
@@ -91,7 +202,6 @@ class Matchmaker(commands.Cog):
 
             coroutines = []
             if False in players_ready:
-                logging.info("Not all players hit ready!")
                 for i in range(len(players_ready)):
                     if not players_ready[i]:
                         coroutines.append(
@@ -112,7 +222,6 @@ class Matchmaker(commands.Cog):
                 await asyncio.gather(*coroutines)
                 return False
             else:
-                logging.info("Create a game here!")
                 for player in players:
                     coroutines.append(
                         self.send_info_message(player, "All players accepted. Creating the match."),
@@ -122,6 +231,8 @@ class Matchmaker(commands.Cog):
                                 player.id
                         )
                 await asyncio.gather(*coroutines)
+
+                await self.initialize_match(players, mode, host)
                 return True
 
         except Exception as error:
@@ -310,7 +421,6 @@ class Matchmaker(commands.Cog):
                 else:
                     member = discord.utils.get(ctx.guild.members, id=host)
                     await msg.edit(content=f"Starting the match!\nMode: `{mode}`\nHost: `{member}`", components=None)
-                    logging.info("Starting a match!") # TODO: start match here
                     await self.create_match(players, mode, member)
                     break
 
