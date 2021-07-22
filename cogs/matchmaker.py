@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from discord.ext.commands.core import group
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
 from discord_slash.utils.manage_components import create_select, create_select_option, spread_to_rows, create_button, wait_for_component
@@ -18,6 +17,7 @@ class Matchmaker(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
 
     async def send_ready_message(self, player: discord.User, mode):
         channel = player.dm_channel
@@ -55,12 +55,14 @@ class Matchmaker(commands.Cog):
             await comp_ctx.edit_origin(embed=embed, components=generate_components(True, ButtonStyle.green))
             return True
 
+
     async def send_info_message(self, player: discord.User, content):
         channel = player.dm_channel
         if not channel:
             channel = await player.create_dm()
 
         await channel.send(content=content)
+
 
     async def initialize_match(self, players: list[discord.User], mode: str, host: discord.user):
         # split the players
@@ -130,8 +132,8 @@ class Matchmaker(commands.Cog):
         # create the database once all data is gathered
         # id, alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
         game_data = await self.bot.pg_con.fetchrow(
-            """INSERT INTO games (alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
-            VALUES ($1, $2, $3, $4, $5, $6, false, '{0, 0, 0, 0, 0}', $7, $8, $9, $10, $11, $12, $13) RETURNING id""",
+            """INSERT INTO games (alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, game_active, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
+            VALUES ($1, $2, $3, $4, $5, $6, false, '{0, 0, 0, 0, 0}', true, $7, $8, $9, $10, $11, $12, $13) RETURNING id""",
             alpha_players, bravo_players, mode, host_id, game_maps, game_modes, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
         )
 
@@ -177,8 +179,6 @@ class Matchmaker(commands.Cog):
     # can include only 2 players for testing
     async def create_match(self, players: list[discord.User], mode: str, host: discord.User):
         try:
-            two_players = True if len(players) == 2 else False
-
             # get name and thumbnail of the mode to send to players
             mode_data = await self.bot.pg_con.fetchrow(
                 "SELECT name, internal_name, thumbnail FROM modes WHERE internal_name = $1",
@@ -238,6 +238,7 @@ class Matchmaker(commands.Cog):
         except Exception as error:
             logging.exception("Create match error!", exc_info=error)
             return
+
 
     @cog_ext.cog_subcommand(
         base="match",
@@ -304,6 +305,7 @@ class Matchmaker(commands.Cog):
     async def create(self, ctx: SlashContext, player1, player2, player3, player4, player5, player6, player7, player8):
         pass # TODO: update this with create_test
 
+
     @cog_ext.cog_subcommand(
         base="match",
         name="create-test",
@@ -331,8 +333,7 @@ class Matchmaker(commands.Cog):
         guild_ids=[bot_data['guild_id']]
     )
     async def create_test(self, ctx: SlashContext, player1, player2):
-        players = []
-        players.extend([player1, player2])
+        players = [player1, player2]
 
         for i in range(len(players)):
             for j in range(len(players) - (i+1)):
@@ -421,7 +422,11 @@ class Matchmaker(commands.Cog):
                 else:
                     member = discord.utils.get(ctx.guild.members, id=host)
                     await msg.edit(content=f"Starting the match!\nMode: `{mode}`\nHost: `{member}`", components=None)
-                    await self.create_match(players, mode, member)
+                    result = await self.create_match(players, mode, member)
+                    if result:
+                        await ctx.send("Match successfully created.")
+                    else:
+                        await ctx.send("Some players did not hit ready!")
                     break
 
 
