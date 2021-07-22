@@ -125,16 +125,13 @@ class Matchmaker(commands.Cog):
             bravo_deviations.append(p_data['deviation'])
             bravo_volatilities.append(p_data['volatility'])
 
-        # generate maps
-        game_maps = []
-        game_modes = []
-
         # create the database once all data is gathered
         # id, alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
+        # TODO: add alpha and bravo group data
         game_data = await self.bot.pg_con.fetchrow(
-            """INSERT INTO games (alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, game_active, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
-            VALUES ($1, $2, $3, $4, $5, $6, false, '{0, 0, 0, 0, 0}', true, $7, $8, $9, $10, $11, $12, $13) RETURNING id""",
-            alpha_players, bravo_players, mode, host_id, game_maps, game_modes, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
+            """INSERT INTO games (alpha_players, bravo_players, mode, host, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id""",
+            alpha_players, bravo_players, mode, host_id, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
         )
 
         # build the channels
