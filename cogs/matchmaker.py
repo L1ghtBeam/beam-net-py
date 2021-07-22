@@ -73,33 +73,21 @@ class Matchmaker(commands.Cog):
                 "SELECT name, internal_name, thumbnail FROM modes WHERE internal_name = $1",
                 mode
             )
-
             coroutines = []
-            ready_coroutines = []
             for player in players:
-                coroutines.append(
-                    self.bot.pg_con.execute(
-                        "UPDATE users SET queue_disable_time = $2 WHERE user_id = $1",
-                        player.id, pytz.utc.localize(datetime.utcnow())+relativedelta(seconds=+25)
-                    )
+                await self.bot.pg_con.execute(
+                    "UPDATE users SET queue_disable_time = $2 WHERE user_id = $1",
+                    player.id, pytz.utc.localize(datetime.utcnow())+relativedelta(seconds=+25)
+                )
+                await self.bot.pg_con.execute(
+                    "UPDATE queue SET available = false WHERE $1 = ANY (player_ids::bigint[]) AND available = true",
+                    player.id
                 )
                 coroutines.append(
-                    self.bot.pg_con.execute(
-                        "UPDATE queue SET available = false WHERE $1 = ANY (player_ids::bigint[]) AND available = true",
-                        player.id
-                    )
-                )
-                ready_coroutines.append(
                     self.send_ready_message(player, mode_data)
                 )
 
-            await asyncio.gather(*coroutines) # mark players as not available in queue and prevent them from re-queueing
-            players_ready = await asyncio.gather(*ready_coroutines) # send ready message to all players and wait for all responces
-
-            def grab_player(user_id):
-                for player in players:
-                    if player.id == user_id:
-                        return player
+            players_ready = await asyncio.gather(*coroutines) # send ready message to all players and wait for all responces
 
             coroutines = []
             if False in players_ready:
@@ -109,21 +97,17 @@ class Matchmaker(commands.Cog):
                         coroutines.append(
                             self.send_info_message(players[i], "You did not accept the match and have been removed from the queue!"), #TODO: send different messages for groups
                         )
-                        coroutines.append(
-                            self.bot.pg_con.execute(
+                        await self.bot.pg_con.execute(
                                 "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
                                 players[i].id
                             )
-                        )
                     else:
                         coroutines.append(
                             self.send_info_message(players[i], "A player did not accept the match."), #TODO: send different messages for groups
                         )
-                        coroutines.append(
-                            self.bot.pg_con.execute(
+                        await self.bot.pg_con.execute(
                                 "UPDATE queue SET available = true WHERE $1 = ANY (player_ids::bigint[])",
                                 players[i].id
-                            )
                         )
                 await asyncio.gather(*coroutines)
                 return False
@@ -133,12 +117,10 @@ class Matchmaker(commands.Cog):
                     coroutines.append(
                         self.send_info_message(player, "All players accepted. Creating the match."),
                     )
-                    coroutines.append(
-                        self.bot.pg_con.execute(
+                    await self.bot.pg_con.execute(
                                 "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
                                 player.id
                         )
-                    )
                 await asyncio.gather(*coroutines)
                 return True
 
