@@ -64,7 +64,7 @@ class Matchmaker(commands.Cog):
         await channel.send(content=content)
 
 
-    async def initialize_match(self, players: list[discord.User], mode: str, host: discord.user):
+    async def initialize_match(self, players: list[discord.User], mode, host: discord.user):
         # split the players
         if not len(players) == 2: # TODO: Remove later once testing with two is no longer needed
             alpha = players[:4]
@@ -96,12 +96,12 @@ class Matchmaker(commands.Cog):
         async def grab_player_data(player): # TODO: make this a util function since it's directly copied from modes.py
             ratings = await self.bot.pg_con.fetchrow(
                     "SELECT user_id, mode, rating, deviation, volatility FROM ratings WHERE user_id = $1 AND mode = $2",
-                    player.id, mode
+                    player.id, mode['internal_name']
                 )
             if not ratings:
                 ratings = await self.bot.pg_con.fetchrow(
                     "INSERT INTO ratings (user_id, mode, rating, deviation, volatility) VALUES ($1, $2, $3, $4, $5) RETURNING rating, deviation, volatility",
-                    player.id, mode, 1500.0, 350.0, 0.06
+                    player.id, mode['internal_name'], 1500.0, 350.0, 0.06
                 )
             return ratings
 
@@ -131,7 +131,7 @@ class Matchmaker(commands.Cog):
         game_data = await self.bot.pg_con.fetchrow(
             """INSERT INTO games (alpha_players, bravo_players, mode, host, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id""",
-            alpha_players, bravo_players, mode, host_id, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
+            alpha_players, bravo_players, mode['internal_name'], host_id, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
         )
 
         # build the channels
@@ -169,7 +169,41 @@ class Matchmaker(commands.Cog):
             set_voice_perms(channels[4], bravo),
         )
 
-        logging.info("Send messages here")
+        # send messages
+        embed = discord.Embed(
+            colour=discord.Color.blue(),
+            title=f"Match #{game_data['id']} - {mode['name']}",
+            description=mode['description'],
+        )
+        if mode['thumbnail']:
+            embed.set_thumbnail(url=mode['thumbnail'])
+
+        def gen_players(players):
+            value = ""
+            for player in players:
+                if player.nick:
+                    value += f"{player.nick} ({player})\n"
+                else:
+                    value += f"{player.name} (#{player.discriminator})\n"
+            return value[:-1]
+
+        embed.add_field(name="__Alpha Team:__", value=gen_players(alpha))
+        embed.add_field(name="__Bravo Team:__", value=gen_players(bravo))
+
+        host_data = await self.bot.pg_con.fetchrow("SELECT user_id, friend_code FROM users WHERE user_id = $1", host_id)
+        if host_data['friend_code']:
+            fc = host_data['friend_code']
+            fc = f"SW-{fc[:4]}-{fc[4:8]}-{fc[8:]}" # TODO: make this a util function
+        else:
+            fc = "unknown fc"
+        embed.add_field(name=f"The host of this match is {host.name}.", value=f"Please add `{fc}` to your friend list.", inline=False)
+
+        content = ""
+        for player in players:
+            content += player.mention + " "
+
+        await channels[0].send(content=content[:-1], embed=embed)
+        # TODO: send additional messages for map generation
 
 
     # Alpha are the first 4 players, Bravo are the last 4
@@ -178,7 +212,7 @@ class Matchmaker(commands.Cog):
         try:
             # get name and thumbnail of the mode to send to players
             mode_data = await self.bot.pg_con.fetchrow(
-                "SELECT name, internal_name, thumbnail FROM modes WHERE internal_name = $1",
+                "SELECT * FROM modes WHERE internal_name = $1",
                 mode
             )
             coroutines = []
@@ -229,7 +263,7 @@ class Matchmaker(commands.Cog):
                         )
                 await asyncio.gather(*coroutines)
 
-                await self.initialize_match(players, mode, host)
+                await self.initialize_match(players, mode_data, host)
                 return True
 
         except Exception as error:
