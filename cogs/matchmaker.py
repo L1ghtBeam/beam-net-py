@@ -360,7 +360,101 @@ class Matchmaker(commands.Cog):
         guild_ids=[bot_data['guild_id']]
     )
     async def create(self, ctx: SlashContext, player1, player2, player3, player4, player5, player6, player7, player8):
-        pass # TODO: update this with create_test
+        players = [player1, player2, player3, player4, player5, player6, player7, player8]
+
+        for i in range(len(players)):
+            for j in range(len(players) - (i+1)):
+                if players[i] == players[j + i + 1]:
+                    await ctx.send("Do not use duplicate players!", hidden=True) 
+                    return
+        
+        # mode select
+        modes = await self.bot.pg_con.fetch("SELECT name, internal_name FROM modes ORDER BY sort_order ASC")
+
+        options = []
+        for mode in modes:
+            options.append(create_select_option(label=mode['name'], value=mode['internal_name']))
+        
+        mode_select = create_select(
+            options=options,
+            placeholder="Choose a mode.",
+            min_values=1,
+            max_values=1,
+            custom_id="set_mode"
+        )
+ 
+        # player host select
+        coroutines = []
+        for player in players:
+            coroutines.append(self.bot.pg_con.fetchrow("SELECT host_pref FROM users WHERE user_id = $1", player.id))
+
+        host_prefs = await asyncio.gather(*coroutines)
+        if [] in host_prefs:
+            index = host_prefs.index([])
+            await ctx.send(f"{players[index]} is not registered!", hidden=True)
+            return
+
+        options = []
+        for i in range(len(players)):
+            emoji = ["🔴", "🟡", "🟢"][host_prefs[i]['host_pref']]
+            options.append(create_select_option(label=str(players[i]), value=str(players[i].id), emoji=emoji))
+
+        host_select = create_select(
+            options=options,
+            placeholder="Choose a host. 🟢 Good, 🟡 okay, 🔴 bad.",
+            min_values=1,
+            max_values=1,
+            custom_id="set_host"
+        )
+
+        # regular start button
+        start_button = create_button(
+            style=ButtonStyle.green,
+            label="Create Match",
+            custom_id="start_game"
+        )
+        
+        content = "Please choose a mode and a host for the match."
+        mode = None
+        host = None
+
+        msg = await ctx.send(content=content, components=spread_to_rows(mode_select, host_select, start_button))
+        
+        while True:
+            try:
+                component_ctx = await wait_for_component(self.bot, messages=msg, timeout=60.0)
+            except asyncio.TimeoutError:
+                await msg.edit(content="Took too long! Please try again.", components=None)
+                return
+            
+            if not ctx.author_id == component_ctx.author_id:
+                asyncio.create_task(
+                    component_ctx.send("You cannot interact with this message!", hidden=True)
+                )
+                continue
+
+            elif component_ctx.custom_id == "set_mode":
+                mode = component_ctx.selected_options[0]
+                await component_ctx.send(f"Mode set to `{mode}`.", hidden=True)
+
+            elif component_ctx.custom_id == "set_host":
+                host = int(component_ctx.selected_options[0])
+                member = discord.utils.get(ctx.guild.members, id=host)
+                await component_ctx.send(f"Host set to `{member}`.", hidden=True)
+
+            elif component_ctx.custom_id == "start_game":
+                ready = not (mode is None or host is None)
+                if not ready:
+                    await component_ctx.send("Please select a mode and a host!", hidden=True)
+                else:
+                    member = discord.utils.get(ctx.guild.members, id=host)
+                    await msg.edit(content=f"Starting the match!\nMode: `{mode}`\nHost: `{member}`", components=None)
+                    result = await self.create_match(players, mode, member)
+                    if result:
+                        await ctx.send("Match successfully created.")
+                    else:
+                        await ctx.send("Some players did not hit ready!")
+                    break
 
 
     @cog_ext.cog_subcommand(
