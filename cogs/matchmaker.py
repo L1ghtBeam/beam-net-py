@@ -125,13 +125,16 @@ class Matchmaker(commands.Cog):
             bravo_deviations.append(p_data['deviation'])
             bravo_volatilities.append(p_data['volatility'])
 
+        # generate score list for how many games in the mode
+        score = [0] * mode['games']
+
         # create the database once all data is gathered
         # id, alpha_players, bravo_players, mode, host, game_maps, game_modes, admin_locked, score, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
         # TODO: add alpha and bravo group data
         game_data = await self.bot.pg_con.fetchrow(
-            """INSERT INTO games (alpha_players, bravo_players, mode, host, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id""",
-            alpha_players, bravo_players, mode['internal_name'], host_id, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
+            """INSERT INTO games (alpha_players, bravo_players, mode, host, score, start_date, alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id""",
+            alpha_players, bravo_players, mode['internal_name'], host_id, score, pytz.utc.localize(datetime.utcnow()), alpha_ratings, alpha_deviations, alpha_volatilities, bravo_ratings, bravo_deviations, bravo_volatilities
         )
 
         # build the channels
@@ -174,6 +177,7 @@ class Matchmaker(commands.Cog):
             colour=discord.Color.blue(),
             title=f"Match #{game_data['id']} - {mode['name']}",
             description=mode['description'],
+            timestamp=datetime.utcnow()
         )
         if mode['thumbnail']:
             embed.set_thumbnail(url=mode['thumbnail'])
@@ -202,8 +206,30 @@ class Matchmaker(commands.Cog):
         for player in players:
             content += player.mention + " "
 
-        await channels[0].send(content=content[:-1], embed=embed)
-        # TODO: send additional messages for map generation
+        msg1 = await channels[0].send(content=content[:-1], embed=embed)
+
+        # send additional message for map generation
+        button = create_button(
+            style=ButtonStyle.green,
+            label="Generate Maps",
+            custom_id=f"generate_maps_{game_data['id']}",
+        )
+        components = spread_to_rows(button)
+
+        embed = discord.Embed(
+            colour=discord.Color.blue(),
+            title=f"Maps are not generated.",
+            description="Click the button below to reveal the maps.",
+            timestamp=datetime.utcnow()
+        )
+
+        msg2 = await channels[0].send(embed=embed, components=components)
+
+        # pin messages
+        await asyncio.gather(
+            msg2.pin(),
+            msg1.pin()
+        )
 
 
     # Alpha are the first 4 players, Bravo are the last 4

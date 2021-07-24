@@ -1,0 +1,94 @@
+{
+    "reef": {
+        "name": "The Reef",
+        "url": "https://i.imgur.com/XKnBB4n.png"
+    },
+    "fitness": {
+        "name": "Musselforge Fitness",
+        "url": "https://i.imgur.com/2D9PpFF.png"
+    },
+    "starfish": {
+        "name": "Starfish Mainstage",
+        "url": "https://i.imgur.com/hoAsRVV.png"
+    },
+    "humpback": {
+        "name": "Humpback Pump Track",
+        "url": "https://i.imgur.com/bfwzJfl.png"
+    },
+    "inkblot": {
+        "name": "Inkblot Art Academy",
+        "url": "https://i.imgur.com/Ytmfvm1.png"
+    },
+    "sturgeon": {
+        "name": "Sturgeon Shipyard",
+        "url": "https://i.imgur.com/VgshoWw.png"
+    },
+    "moray": {
+        "name": "Moray Towers",
+        "url": "https://i.imgur.com/jyEEhkl.png"
+    },
+    "port": {
+        "name": "Port Mackerel",
+        "url": "https://i.imgur.com/rfig6zr.png"
+    },
+    "manta": {
+        "name": "Manta Maria",
+        "url": "https://i.imgur.com/DhzWIbm.png"
+    },
+    "kelp": {
+        "name": "Kelp Dome",
+        "url": "https://i.imgur.com/vI0LMSo.png"
+    },
+    "canal": {
+        "name": "Snapper Canal",
+        "url": "https://i.imgur.com/v4okaCY.png"
+    },
+    "skatepark": {
+        "name": "Blackbelly Skatepark",
+        "url": "https://i.imgur.com/xujTC0B.png"
+    },
+    "mako": {
+        "name": "MakoMart",
+        "url": "https://i.imgur.com/CHjPtVI.png"
+    },
+    "walleye": {
+        "name": "Walleye Warehouse",
+        "url": "https://i.imgur.com/xhjqH5f.png"
+    },
+    "dorf": {
+        "name": "Shellendorf Institute",
+        "url": "https://i.imgur.com/IOuqGtR.png"
+    },
+    "mall": {
+        "name": "Arowana Mall",
+        "url": "https://i.imgur.com/IWExdK9.png"
+    },
+    "goby": {
+        "name": "Goby Arena",
+        "url": "https://i.imgur.com/Bt0gNGN.png"
+    },
+    "pit": {
+        "name": "Piranha Pit",
+        "url": "https://i.imgur.com/d1mQXmy.png"
+    },
+    "camp": {
+        "name": "Camp Triggerfish",
+        "url": "https://i.imgur.com/CBkY4Q7.png"
+    },
+    "wahoo": {
+        "name": "Wahoo World",
+        "url": "https://i.imgur.com/kQcv3y9.png"
+    },
+    "hotel": {
+        "name": "New Albacore Hotel",
+        "url": "https://i.imgur.com/M3ZQBQz.png"
+    },
+    "ancho": {
+        "name": "Ancho-V Games",
+        "url": "https://i.imgur.com/CNy6nzb.png"
+    },
+    "skipper": {
+        "name": "Skipper Pavilion",
+        "url": "https://i.imgur.com/Te6dZyg.png"
+    }
+}
