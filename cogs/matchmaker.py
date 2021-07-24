@@ -206,7 +206,7 @@ class Matchmaker(commands.Cog):
         for player in players:
             content += player.mention + " "
 
-        msg1 = await channels[0].send(content=content[:-1], embed=embed)
+        msg1 = await channels[0].send(content=content[:-1], embed=embed) # TODO: send a "report match issue" button
 
         # send additional message for map generation
         button = create_button(

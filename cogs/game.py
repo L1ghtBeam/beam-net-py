@@ -62,47 +62,121 @@ class Game(commands.Cog):
         return generated_maps, generated_modes
 
 
-    async def show_maps(self, ctx: ComponentContext, id: int):
-        game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-        mode = await self.bot.pg_con.fetchrow("SELECT * FROM modes WHERE internal_name = $1", game['mode'])
-
-        num = 0
-        alpha = 0
-        bravo = 0
+    async def update_game_score(self, game, score_id):
+        index = 0
         for score in game['score']:
             if score == 0:
                 break
-            elif score == 1:
-                alpha += 1
+            index += 1
+        
+        offset = 1 if score_id == 0 else 0 # if score_id is 0, undo the last score report
+
+        new_score = game['score']
+        new_score[index - offset] = score_id
+        await self.bot.pg_con.execute(
+            "UPDATE games SET score = $2 WHERE id = $1",
+            game['id'], new_score
+        )
+
+
+    async def show_maps(self, ctx: ComponentContext, id: int):
+        try:
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            mode = await self.bot.pg_con.fetchrow("SELECT * FROM modes WHERE internal_name = $1", game['mode'])
+
+            num = 0
+            alpha = 0
+            bravo = 0
+            score_history = ""
+            for score in game['score']:
+                if score == 0:
+                    break
+                elif score == 1:
+                    alpha += 1
+                    score_history += f"{num + 1}. Alpha Won - "
+                else:
+                    bravo += 1
+                    score_history += f"{num + 1}. Bravo Won - "
+                
+                score_history += mode_key[game['game_modes'][num]]['emoji'] + " "
+                score_history += map_key[game['game_maps'][num]]['name'] + "\n"
+                
+                num += 1
+            
+            match_complete = False
+            if not mode['play_all_games']:
+                points_to_win = mode['games'] // 2 + 1
+                match_complete = alpha >= points_to_win or bravo >= points_to_win
             else:
-                bravo += 1
-            num += 1
-        
-        match_complete = False
-        if not mode['play_all_games']:
-            points_to_win = mode['games'] // 2 + 1
-            match_complete = alpha >= points_to_win or bravo >= points_to_win
-        else:
-            match_complete = num >= mode['games']
- 
-        if not match_complete:
-            game_map = game['game_maps'][num]
-            game_map_str = map_key[game_map]['name']
+                match_complete = num >= mode['games']
+    
+            if not match_complete:
+                game_map = game['game_maps'][num]
+                game_map_str = map_key[game_map]['name']
 
-            game_mode = game['game_modes'][num]
-            game_mode_str = mode_key[game_mode]['name']
+                game_mode = game['game_modes'][num]
+                game_mode_str = mode_key[game_mode]['name']
 
-            embed = discord.Embed(
-                colour=discord.Color.blue(),
-                title=f"Game {num + 1}: {game_map_str} - {game_mode_str}",
-                description="Please report the score below once the game has finished.",
-                timestamp=datetime.utcnow()
-            )
+                embed = discord.Embed(
+                    colour=discord.Color.blue(),
+                    title=f"Game {num + 1}: {game_map_str} - {game_mode_str}",
+                    description="Please report the score below once the game has finished.",
+                    timestamp=datetime.utcnow()
+                )
 
-            embed.set_image(url=map_key[game_map]['url'])
-            embed.set_thumbnail(url=mode_key[game_mode]['url'])
-        
-        await ctx.edit_origin(embed=embed, components=None) # TODO: add components for score reporting
+                embed.set_image(url=map_key[game_map]['url'])
+                embed.set_thumbnail(url=mode_key[game_mode]['url'])
+
+                if score_history:
+                    embed.add_field(name="Score:", value=score_history[:-1], inline=False)
+
+                back = create_button(
+                    style=ButtonStyle.red,
+                    label="Undo",
+                    custom_id=f"undo_map_{id}",
+                    disabled=num==0
+                )
+                alpha_win = create_button(
+                    style=ButtonStyle.green,
+                    label="Alpha Won",
+                    custom_id=f"win_alpha_{id}"
+                )
+                bravo_win = create_button(
+                    style=ButtonStyle.blue,
+                    label="Bravo Won",
+                    custom_id=f"win_bravo_{id}"
+                )
+                components=spread_to_rows(back, alpha_win, bravo_win)
+            
+            else:
+                embed = discord.Embed(
+                    colour=discord.Color.blue(),
+                    title=f"Final Score: Alpha {alpha} - {bravo} Bravo",
+                    description="Please verify that the score is correct before submitting.",
+                    timestamp=datetime.utcnow()
+                )
+
+                if score_history:
+                    embed.add_field(name="Score:", value=score_history[:-1], inline=False)
+                
+                back = create_button(
+                    style=ButtonStyle.red,
+                    label="Undo",
+                    custom_id=f"undo_map_{id}",
+                    disabled=num==0
+                )
+                submit = create_button(
+                    style=ButtonStyle.green,
+                    label="Submit",
+                    custom_id=f"submit_score_{id}"
+                )
+                components=spread_to_rows(back, submit)
+            
+            await ctx.edit_origin(embed=embed, components=components)
+
+        except Exception as error:
+            logging.exception("Show maps error!", exc_info=error)
+            return
 
 
     @cog_ext.cog_subcommand(
@@ -159,6 +233,44 @@ class Game(commands.Cog):
                 )
             
             await self.show_maps(ctx, id)
+        elif ctx.custom_id[:10] == "win_alpha_":
+            id = int(ctx.custom_id[10:])
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            if ctx.author_id != game['host']:
+                await ctx.send("Only the host can report the score!", hidden=True)
+                return
+            
+            await self.update_game_score(game, 1)
+            await self.show_maps(ctx, id)
+        
+        elif ctx.custom_id[:10] == "win_bravo_":
+            id = int(ctx.custom_id[10:])
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            if ctx.author_id != game['host']:
+                await ctx.send("Only the host can report the score!", hidden=True)
+                return
+            
+            await self.update_game_score(game, 2)
+            await self.show_maps(ctx, id)
+
+        elif ctx.custom_id[:9] == "undo_map_":
+            id = int(ctx.custom_id[9:])
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            if ctx.author_id != game['host']:
+                await ctx.send("Only the host can do this action!", hidden=True)
+                return
+
+            await self.update_game_score(game, 0)
+            await self.show_maps(ctx, id)
+        
+        elif ctx.custom_id[:13] == "submit_score_":
+            id = int(ctx.custom_id[13:])
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            if ctx.author_id != game['host']:
+                await ctx.send("Only the host can report the score!", hidden=True)
+                return
+            
+            await ctx.send("The score would have been submitted if I coded that part yet!", hidden=True) # TODO: allow submitting the score
 
             
 def setup(bot):
