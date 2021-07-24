@@ -1,22 +1,27 @@
 {
     "sz": {
-        "name": "<:SZ:868294987945766912>",
+        "name": "Splat Zones",
+        "emoji": "<:SZ:868294987945766912>",
         "url": "https://i.imgur.com/PFlh5QE.png"
     },
     "tc": {
-        "name": "<:TC:868294987987693568>",
+        "name": "Tower Control",
+        "emoji": "<:TC:868294987987693568>",
         "url": "https://i.imgur.com/dks1Vr7.png"
     },
     "rm": {
-        "name": "<:RM:868294987882835988>",
+        "name": "Rainmaker",
+        "emoji": "<:RM:868294987882835988>",
         "url": "https://i.imgur.com/XQ1BxFA.png"
     },
     "cb": {
-        "name": "<:CB:868294987685716029>",
+        "name": "Clam Blitz",
+        "emoji": "<:CB:868294987685716029>",
         "url": "https://i.imgur.com/kcSlKzg.png"
     },
     "tw": {
-        "name": "<:TW:868294988004458506>",
+        "name": "Turf War",
+        "emoji": "<:TW:868294988004458506>",
         "url": "https://i.imgur.com/IqwU7Uu.png"
     }
 }

@@ -94,7 +94,7 @@ class Game(commands.Cog):
 
             embed = discord.Embed(
                 colour=discord.Color.blue(),
-                title=f"Game {num + 1}: {game_map_str} {game_mode_str}",
+                title=f"Game {num + 1}: {game_map_str} - {game_mode_str}",
                 description="Please report the score below once the game has finished.",
                 timestamp=datetime.utcnow()
             )
