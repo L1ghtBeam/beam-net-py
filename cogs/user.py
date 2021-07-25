@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
-from discord_slash.utils.manage_components import ButtonStyle, create_actionrow, create_button, wait_for_component
+from discord_slash.utils.manage_components import ButtonStyle, spread_to_rows, create_button, wait_for_component
 from discord_slash.model import SlashCommandPermissionType
 
 from datetime import datetime
@@ -55,7 +55,7 @@ class User(commands.Cog):
         embed = discord.Embed(
             colour = discord.Colour.blue(),
             timestamp=datetime.utcnow(),
-            title="Have you read and agreed to the rules and understand how Beam Net works?",
+            title="Have you read the rules and understand how Beam Net works?",
             description="More information in `#info` of the Beam Net server."
         )
 
@@ -65,92 +65,105 @@ class User(commands.Cog):
         )
         embed.set_footer(text="Page (1/3)")
 
-        embed.add_field(name="Yes", value="I agree with all the rules and understand how Beam Net works.")
-        embed.add_field(name="No", value="I disagree with any of the above mentioned.")
+        embed.add_field(name="Yes", value="I have read the rules and understand how Beam Net works.")
+        embed.add_field(name="No", value="I have not read the rules or information.")
 
-        components = [create_actionrow(
-            create_button(ButtonStyle.success, label="Yes", custom_id="yes"),
-            create_button(ButtonStyle.danger, label="No", custom_id="no"),
-        )]
+        components = spread_to_rows(
+            create_button(ButtonStyle.green, label="Yes", custom_id="yes"),
+            create_button(ButtonStyle.red, label="No", custom_id="no"),
+        )
         
         msg = await channel.send(embed=embed, components=components)
         
         try:
-            button_ctx = await wait_for_component(self.bot, message=msg, timeout=90)
-        except:
+            button_ctx = await wait_for_component(self.bot, messages=msg, timeout=90)
+        except asyncio.TimeoutError:
             await timeout()
             return
 
         if button_ctx.custom_id == "no":
             await msg.edit(content="Please read `#info` and try again.", embed=None, components=None)
             return
-        
-        # Registration 2/3
-        embed = discord.Embed(
-            colour = discord.Colour.blue(),
-            timestamp=datetime.utcnow(),
-            title="Do you understand how the online lounge works and have a device with both the Nintendo Switch Online app and Discord installed?",
-            description="More information in `#online-lounge` of the Beam Net server."
-        )
 
-        embed.set_author(
-            name=f"Registration - {ctx.author}",
-            icon_url=ctx.author.avatar_url
-        )
+        # Registration 2/3
+        embed.title="Please rate your ability to host matches."
+        embed.description="Option 3 will skip page 3."
+        embed.timestamp=datetime.utcnow()
+
         embed.set_footer(text="Page (2/3)")
 
-        embed.add_field(name="Yes", value="I have a device with both apps installed and I understand how to use the online lounge.")
-        embed.add_field(name="No", value="I disagree with any of the above mentioned.")
-
-        await button_ctx.edit_origin(embed=embed, components=components)
-
-        try:
-            button_ctx = await wait_for_component(self.bot, message=msg, timeout=90)
-        except:
-            await timeout()
-            return
-        
-        if button_ctx.custom_id == "no":
-            await msg.edit(content="Please read `#online-lounge` and try again.", embed=None, components=None)
-            return
-        
-        # Registration 3/3
-        embed = discord.Embed(
-            colour = discord.Colour.blue(),
-            timestamp=datetime.utcnow(),
-            title="Please rate your ability to host matches."
-        )
-
-        embed.set_author(
-            name=f"Registration - {ctx.author}",
-            icon_url=ctx.author.avatar_url
-        )
-        embed.set_footer(text="Page (3/3)")
+        embed.clear_fields()
 
         embed.add_field(name="1", value="My internet connection is good and I would like to host whenever possible.")
         embed.add_field(name="2", value="My internet connection is decent to good, but I would rather not host unless I have to.")
         embed.add_field(name="3", value="My internet connection is poor and I should never host.")
 
-        components = [create_actionrow(
-            create_button(ButtonStyle.secondary, label="1", custom_id="1"),
-            create_button(ButtonStyle.secondary, label="2", custom_id="2"),
-            create_button(ButtonStyle.secondary, label="3", custom_id="3"),
-        )]
+        components = spread_to_rows(
+            create_button(ButtonStyle.gray, label="1", custom_id="1"),
+            create_button(ButtonStyle.gray, label="2", custom_id="2"),
+            create_button(ButtonStyle.gray, label="3", custom_id="3"),
+        )
 
         await button_ctx.edit_origin(embed=embed, components=components)
 
         try:
-            button_ctx = await wait_for_component(self.bot, message=msg, timeout=90)
-        except:
+            button_ctx = await wait_for_component(self.bot, messages=msg, timeout=90)
+        except asyncio.TimeoutError:
             await timeout()
             return
 
         host_pref = 3 - int(button_ctx.custom_id)
 
+        # Registration 3/3
+        if host_pref != 0:
+            embed.title="Please type your friend code below."
+            embed.description=None
+            embed.set_footer(text="Page (3/3)")
+            fc_error = False
+
+            while True:
+                embed.timestamp=datetime.utcnow()
+                embed.clear_fields()
+                embed.add_field(
+                    name="No Friend Code",
+                    value="If you do not have access to your friend code, type `skip`. Without a friend code, you will not be able to host matches.",
+                    inline=False
+                )
+                if fc_error:
+                    embed.add_field(name="Invalid friend code!", value="Please try again.")
+
+                await msg.edit(embed=embed, components=None)
+
+                def check(msg):
+                    return msg.channel == channel
+
+                try:
+                    reply = await self.bot.wait_for('message', timeout=90, check=check)
+                except asyncio.TimeoutError:
+                    await timeout()
+                    return
+                
+                fc_raw = reply.content.strip().upper()
+                if fc_raw == "SKIP":
+                    fc = None
+                    host_pref = 0
+                    break
+
+                fc = fc_raw.replace("SW", "").replace("-","")
+                try:
+                    int(fc)
+                except ValueError:
+                    fc_error = True
+                    continue
+                else:
+                    break
+        else:
+            fc = None
+
         try:
             await db.execute(
-                "INSERT INTO users (user_id, host_pref, register_date) VALUES ($1, $2, $3)",
-                user_id, host_pref, pytz.utc.localize(datetime.utcnow())
+                "INSERT INTO users (user_id, host_pref, register_date, friend_code) VALUES ($1, $2, $3, $4)",
+                user_id, host_pref, pytz.utc.localize(datetime.utcnow()), fc
             )
         except:
             await msg.edit(content="You are already registered.", embed=None, components=None)
@@ -160,7 +173,8 @@ class User(commands.Cog):
             ctx.author.add_roles(role),
             msg.edit(content="You have been successfully registered. You may now use Beam Net.", embed=None, components=None)
         )
-    
+
+
     @cog_ext.cog_slash(
         name="user",
         description="Get info about a user.",
