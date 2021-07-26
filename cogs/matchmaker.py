@@ -231,6 +231,11 @@ class Matchmaker(commands.Cog):
             msg1.pin()
         )
 
+        # mark all players as last played on this date
+        now = pytz.utc.localize(datetime.utcnow())
+        for player in players:
+            await self.bot.pg_con.execute("UPDATE users SET last_played = $2 WHERE user_id = $1", player.id, now)
+
 
     # Alpha are the first 4 players, Bravo are the last 4
     # can include only 2 players for testing
