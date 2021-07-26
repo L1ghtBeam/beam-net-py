@@ -232,6 +232,7 @@ class User(commands.Cog):
         embed.add_field(name="Ratings", value=value, inline=False)
 
         def date_to_string(date: datetime):
+            date = date.astimezone(pytz.timezone(bot_data['timezone']))
             if date:
                 return date.strftime("%x")
             else:
