@@ -310,7 +310,7 @@ class Matchmaker(commands.Cog):
 
 
     @cog_ext.cog_subcommand(
-        base="match",
+        base="matchmaker",
         name="create",
         description="Create a new 4v4 match on any mode.",
         options=[
@@ -470,7 +470,7 @@ class Matchmaker(commands.Cog):
 
 
     @cog_ext.cog_subcommand(
-        base="match",
+        base="matchmaker",
         name="create-test",
         description="Use this command to test match creation without requiring 8 players.",
         options=[

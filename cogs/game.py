@@ -387,6 +387,12 @@ class Game(commands.Cog):
         base="match",
         name="unlock",
         description="Unlock a match once a match issue has been resolved.",
+        base_default_permission=False, # changes permissions for base command match
+        base_permissions={
+            bot_data['guild_id']: [
+                create_permission(bot_data['admin_id'], SlashCommandPermissionType.ROLE, True)
+            ]
+        },
         guild_ids=[bot_data['guild_id']]
     )
     async def unlock(self, ctx: SlashContext):
