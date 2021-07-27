@@ -166,16 +166,23 @@ class Modes(commands.Cog):
                     "SELECT * FROM queue WHERE mode = $1",
                     mode['internal_name']
                 )
-                player_count = len(queue)
-
+                search_count = len(queue)
                 embed.add_field(
                     name="Searching",
-                    value=f"`{player_count}` 🔎"
+                    value=f"`{search_count}` 🔎"
                 )
 
+                games = await self.bot.pg_con.fetch(
+                    "SELECT * FROM games WHERE mode = $1 AND game_active = true",
+                    mode['internal_name']
+                )
+                play_count = 0
+                for game in games:
+                    play_count += len(game['alpha_players'])
+                    play_count += len(game['bravo_players'])
                 embed.add_field(
                     name="In-game",
-                    value=f"`0` 🆚"
+                    value=f"`{play_count}` 🆚"
                 )
 
             b1 = create_button(style=style, label=label, custom_id=f"mode_join_{mode['internal_name']}", disabled=disabled)
