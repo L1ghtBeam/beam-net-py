@@ -32,12 +32,23 @@ class Modes(commands.Cog):
             
             if mode['status'] == 0:
                 await ctx.send(f"**{mode['name']}** is currently unavailable.", hidden=True)
+                return
             elif mode['status'] == 2:
                 await ctx.send(f"**{mode['name']}** is temporarily unavailable.", hidden=True)
-            
-            # TODO: Check if player is in party. If they are, prevent the player from joining if they are not the party leader.
-            # If they are the leader, add their entire team to the queue
+                return
 
+            # TODO: Check if player is in party. If they are, prevent the player from joining if they are not the party leader.
+            # If they are the leader, add their entire team to the queue and do the checks below for all of them
+
+            # prevent players from joining if they are already in a game
+            games = await self.bot.pg_con.fetch(
+                "SELECT game_active, alpha_players, bravo_players FROM games WHERE game_active = true AND ($1 = ANY (alpha_players::bigint[]) OR $1 = ANY (bravo_players::bigint[]))",
+                ctx.author_id
+            )
+            if games:
+                await ctx.send("You must finish your current match before starting a new one!", hidden=True)
+                return
+            
             # check if queue_disable_time has passed or not
             user = await self.bot.pg_con.fetchrow(
                 "SELECT user_id, queue_disable_time FROM users WHERE user_id = $1",
