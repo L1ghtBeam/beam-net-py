@@ -109,14 +109,19 @@ class Game(commands.Cog):
             for rating in game['bravo_ratings']:
                 bravo_ratings += rating
 
-            game_rd_list = []
-            for rd in game['alpha_deviations']:
-                game_rd_list.append(rd)
-            for rd in game['bravo_deviations']:
-                game_rd_list.append(rd)
+            def get_rd_list(player_rd):
+                game_rd_list = []
+                for rd in game['alpha_deviations']:
+                    game_rd_list.append(rd)
+                for rd in game['bravo_deviations']:
+                    game_rd_list.append(rd)
+
+                game_rd_list.remove(player_rd)
+                return game_rd_list
 
             for player_id in game['alpha_players']:
                 rating = await self.bot.pg_con.fetchrow("SELECT * FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
+                game_rd_list = get_rd_list(rating['deviation'])
                 if not (rating['rating_initial'] and rating['deviation_initial'] and rating['volatility_initial']):
                     rating = await self.bot.pg_con.fetchrow(
                         "UPDATE ratings SET rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility WHERE user_id = $1 AND mode = $2 RETURNING *",
@@ -138,6 +143,7 @@ class Game(commands.Cog):
 
             for player_id in game['bravo_players']:
                 rating = await self.bot.pg_con.fetchrow("SELECT * FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
+                game_rd_list = get_rd_list(rating['deviation'])
                 if not (rating['rating_initial'] and rating['deviation_initial'] and rating['volatility_initial']):
                     rating = await self.bot.pg_con.fetchrow(
                         "UPDATE ratings SET rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility WHERE user_id = $1 AND mode = $2 RETURNING *",
