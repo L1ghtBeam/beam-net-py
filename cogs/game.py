@@ -542,7 +542,7 @@ class Game(commands.Cog):
             if not channel:
                 logging.warning("A channel named \"#match-issues\" could not be found so a match issue message cannot be sent!")
             else:
-                embed.title=f"A match issue has been reported in Match #{id}"
+                embed.title=f"A match issue has been reported in match #{id}."
                 embed.description="Any available admin please press the button below."
                 embed.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
 
