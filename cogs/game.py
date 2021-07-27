@@ -1,11 +1,10 @@
 import discord
 from discord.ext import commands, tasks
-from discord.ext.commands.core import group
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
 from discord_slash.utils.manage_components import create_select, create_select_option, spread_to_rows, create_button, wait_for_component
 from discord_slash.model import SlashCommandPermissionType, ButtonStyle, ComponentType
-from rating import create_player
+from rating_utils import create_player
 from glicko2 import Player
 
 from datetime import datetime
