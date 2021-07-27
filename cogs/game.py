@@ -380,7 +380,7 @@ class Game(commands.Cog):
     @cog_ext.cog_subcommand(
         base="match",
         name="unlock",
-        description="Unlock a match once the match issue has been resolved.",
+        description="Unlock a match once a match issue has been resolved.",
         guild_ids=[bot_data['guild_id']]
     )
     async def unlock(self, ctx: SlashContext):
@@ -413,36 +413,7 @@ class Game(commands.Cog):
         for channel in category.channels:
             await channel.set_permissions(ctx.author, overwrite=None)
 
-
-    @cog_ext.cog_subcommand(
-        base="match",
-        name="cleanup",
-        description="Cleanup the channels from a game. Does not touch the database.",
-        options=[
-            create_option(
-                name="match",
-                description="The match number.",
-                option_type=SlashCommandOptionType.INTEGER,
-                required=True
-            ),
-        ],
-        guild_ids=[bot_data['guild_id']]
-    )
-    async def cleanup(self, ctx: SlashContext, match: int):
-        category = discord.utils.get(ctx.guild.channels, name=f'match #{match}')
-        reason = f"{ctx.author} used /cleanup for match #{match}"
-        logging.info(reason)
-
-        coroutines = []
-        for channel in category.channels:
-            coroutines.append(
-                channel.delete(reason=reason)
-            )
-        await asyncio.gather(*coroutines)
-        await category.delete(reason=reason)
-        await ctx.send("Cleanup successful!")
     
-
     @commands.Cog.listener()
     async def on_component(self, ctx: ComponentContext):
         if ctx.custom_id[:14] == "generate_maps_":
