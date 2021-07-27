@@ -58,12 +58,12 @@ class Rating(commands.Cog):
                 )
 
     @manage_rating_periods.before_loop
-    async def before_game_closer(self):
+    async def before_manage_rating_periods(self):
         await self.bot.wait_until_ready()
         logging.info("Starting rating period manager.")
 
     @manage_rating_periods.error
-    async def error_update_all(self, error):
+    async def error_manage_rating_periods(self, error):
         logging.exception("Rating period manager error!", exc_info=error)
         logging.error("Attempting to restart the rating period manager in 5 minutes.")
         await asyncio.sleep(300)
