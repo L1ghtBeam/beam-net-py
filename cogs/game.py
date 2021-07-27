@@ -360,6 +360,60 @@ class Game(commands.Cog):
             return
 
 
+    async def can_change_score(self, ctx: ComponentContext, game):
+        if not game['admin_locked']:
+            if ctx.author_id != game['host']:
+                await ctx.send("Only the host can do this action!", hidden=True)
+                return False
+        else:
+            role = discord.utils.get(ctx.guild.roles, id=bot_data['admin_id'])
+            if not role in ctx.author.roles:
+                await ctx.send("The match is currently locked. Only an admin can do this action!", hidden=True)
+                return False
+        
+        if game['submit_time']:
+                await ctx.send("The score has already been submitted. If this is a problem, please report a match issue.", hidden=True)
+                return False
+        return True
+
+
+    @cog_ext.cog_subcommand(
+        base="match",
+        name="unlock",
+        description="Unlock a match once the match issue has been resolved.",
+        guild_ids=[bot_data['guild_id']]
+    )
+    async def unlock(self, ctx: SlashContext):
+        category = ctx.channel.category
+        if category.name[:7] != "match #":
+            await ctx.send("Can't use this command here!", hidden=True)
+            return
+
+        match_chat = category.text_channels[0]
+        if ctx.channel != match_chat:
+            await ctx.send(f"Please use this command in {match_chat.mention}.", hidden=True)
+            return
+
+        id = int(category.name[7:])
+        game = await self.bot.pg_con.fetchrow("SELECT id, admin_locked FROM games WHERE id = $1", id)
+        if not game['admin_locked']:
+            await ctx.send("This match is not locked.", hidden=True)
+            return
+
+        embed = discord.Embed(
+            color=discord.Color.red(),
+            timestamp=datetime.utcnow(),
+            title="The match issue has been resolved.",
+            description="The game may now resume."
+        )
+
+        asyncio.create_task(ctx.send(embed=embed))
+        await self.bot.pg_con.execute("UPDATE games SET admin_locked = false WHERE id = $1", id)
+
+        for channel in category.channels:
+            await channel.set_permissions(ctx.author, overwrite=None)
+
+
     @cog_ext.cog_subcommand(
         base="match",
         name="cleanup",
@@ -372,12 +426,6 @@ class Game(commands.Cog):
                 required=True
             ),
         ],
-        base_default_permission=False,
-        base_permissions={
-            bot_data['guild_id']: [
-                create_permission(bot_data['admin_id'], SlashCommandPermissionType.ROLE, True)
-            ]
-        },
         guild_ids=[bot_data['guild_id']]
     )
     async def cleanup(self, ctx: SlashContext, match: int):
@@ -398,11 +446,10 @@ class Game(commands.Cog):
     @commands.Cog.listener()
     async def on_component(self, ctx: ComponentContext):
         if ctx.custom_id[:14] == "generate_maps_":
-            # prevent anyone other than the host from generating maps
             id = int(ctx.custom_id[14:])
             game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-            if ctx.author_id != game['host']:
-                await ctx.send("Only the host can generate maps!", hidden=True)
+
+            if not await self.can_change_score(ctx, game):
                 return
 
             mode = await self.bot.pg_con.fetchrow("SELECT internal_name, maplist, format FROM modes WHERE internal_name = $1", game['mode'])
@@ -417,8 +464,8 @@ class Game(commands.Cog):
         elif ctx.custom_id[:10] == "win_alpha_":
             id = int(ctx.custom_id[10:])
             game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-            if ctx.author_id != game['host']:
-                await ctx.send("Only the host can report the score!", hidden=True)
+
+            if not await self.can_change_score(ctx, game):
                 return
             
             await self.update_game_score(game, 1)
@@ -427,8 +474,8 @@ class Game(commands.Cog):
         elif ctx.custom_id[:10] == "win_bravo_":
             id = int(ctx.custom_id[10:])
             game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-            if ctx.author_id != game['host']:
-                await ctx.send("Only the host can report the score!", hidden=True)
+
+            if not await self.can_change_score(ctx, game):
                 return
             
             await self.update_game_score(game, 2)
@@ -437,13 +484,9 @@ class Game(commands.Cog):
         elif ctx.custom_id[:9] == "undo_map_":
             id = int(ctx.custom_id[9:])
             game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-            if ctx.author_id != game['host']:
-                await ctx.send("Only the host can do this action!", hidden=True)
-                return
 
-            if game['submit_time']:
-                await ctx.send("The score has already been submitted. If this is a problem, please report a match issue.", hidden=True)
-                return
+            if not await self.can_change_score(ctx, game):
+                return        
 
             await self.update_game_score(game, 0)
             await self.show_maps(ctx, id)
@@ -451,14 +494,10 @@ class Game(commands.Cog):
         elif ctx.custom_id[:13] == "submit_score_":
             id = int(ctx.custom_id[13:])
             game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-            if ctx.author_id != game['host']:
-                await ctx.send("Only the host can report the score!", hidden=True)
+            
+            if not await self.can_change_score(ctx, game):
                 return
             
-            if game['submit_time']:
-                await ctx.send("The score has already been submitted. If this is a problem, please report a match issue.", hidden=True)
-                return
-
             submit_time = pytz.utc.localize(datetime.utcnow())+relativedelta(seconds=+30)
             await self.bot.pg_con.execute(
                 "UPDATE games SET submit_time = $2 WHERE id = $1",
@@ -479,8 +518,9 @@ class Game(commands.Cog):
                 title=f"The score has been submitted as Alpha {alpha} - {bravo} Bravo",
                 description="The match will be automatically closed in 30 seconds unless a match issue is reported."
             )
+            title = "(admin)" if game['admin_locked'] else "(host)"
             embed.set_author(
-                name=f"{ctx.author} (host)",
+                name=f"{ctx.author} {title}",
                 icon_url=ctx.author.avatar_url
             )
 
@@ -495,7 +535,85 @@ class Game(commands.Cog):
                     content += member.mention + " "
 
             await ctx.send("You submitted the score.", hidden=True)
-            await ctx.channel.send(content=content[:-1], embed=embed) # TODO: add a component with another report match issue button
+
+            match_issue = create_button(
+                ButtonStyle.red,
+                label="Report Match Issue",
+                custom_id=f"match_issue_{id}"
+            )
+            components = spread_to_rows(match_issue)
+
+            await ctx.channel.send(content=content[:-1], embed=embed, components=components)
+        
+        elif ctx.custom_id[:12] == "match_issue_":
+            id = int(ctx.custom_id[12:])
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            if game['admin_locked'] is True:
+                await ctx.send("A match issue has already been reported!", hidden=True)
+                return
+            
+            now = pytz.utc.localize(datetime.utcnow())
+            if game['submit_time']:
+                if game['submit_time'] <= now:
+                    await ctx.send("The match has already been submitted!", hidden=True)
+                    return
+
+            embed = discord.Embed(
+                color = discord.Color.red(),
+                timestamp=datetime.utcnow(),
+                title="A match issue has been reported!",
+                description="An admin will be here shortly to resolve the issue."
+            )
+            asyncio.create_task(ctx.send(embed=embed))
+            await self.bot.pg_con.execute("UPDATE games SET admin_locked = true, submit_time = null WHERE id = $1", id)
+
+            channel = discord.utils.get(ctx.guild.channels, name="match-issues")
+            if not channel:
+                logging.warning("A channel named \"#match-issues\" could not be found so a match issue message cannot be sent!")
+            else:
+                embed.title=f"A match issue has been reported in Match #{id}"
+                embed.description="Any available admin please press the button below."
+                embed.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
+
+                assign_admin = create_button(
+                    ButtonStyle.green,
+                    label="Assign To Match",
+                    custom_id=f"admin_assign_{id}"
+                )
+                components = spread_to_rows(assign_admin)
+
+                role = discord.utils.get(ctx.guild.roles, id=bot_data['admin_id'])
+                content = role.mention if role else "Admin role not found!"
+
+                await channel.send(content=content, embed=embed, components=components)
+
+        elif ctx.custom_id[:13] == "admin_assign_":
+            id = int(ctx.custom_id[13:])
+            
+            embed = discord.Embed(
+                color = discord.Color.red(),
+                timestamp=datetime.utcnow(),
+                title=f"{ctx.author.name} has been assigned to this match.",
+            )
+            embed.set_author(name=f"{ctx.author} (admin)", icon_url=ctx.author.avatar_url)
+            asyncio.create_task(ctx.send(embed=embed))
+
+            assign_admin = create_button(
+                    ButtonStyle.green,
+                    label="Assign To Match",
+                    disabled=True
+                )
+            components = spread_to_rows(assign_admin)
+            asyncio.create_task(ctx.origin_message.edit(components=components))
+            
+            category = discord.utils.get(ctx.guild.categories, name=f"match #{id}")
+            for channel in category.text_channels:
+                await channel.set_permissions(ctx.author, view_channel=True)
+            for channel in category.voice_channels:
+                await channel.set_permissions(ctx.author, view_channel=True, connect=True)
+            
+            await category.text_channels[0].send(content=ctx.author.mention, embed=embed)
+            
             
 def setup(bot):
     bot.add_cog(Game(bot))

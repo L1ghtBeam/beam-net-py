@@ -155,7 +155,7 @@ class Matchmaker(commands.Cog):
         for channel in channels:
             await channel.move(category=category, end=True, reason=reason)
         
-        # move and set permissions
+        # set permissions
         async def set_text_perms(channel, players):
             for player in players:
                 await channel.set_permissions(player, view_channel=True)
@@ -206,7 +206,14 @@ class Matchmaker(commands.Cog):
         for player in players:
             content += player.mention + " "
 
-        msg1 = await channels[0].send(content=content[:-1], embed=embed) # TODO: send a "report match issue" button
+        match_issue = create_button(
+            ButtonStyle.red,
+            label="Report Match Issue",
+            custom_id=f"match_issue_{game_data['id']}"
+        )
+        components = spread_to_rows(match_issue)
+
+        msg1 = await channels[0].send(content=content[:-1], embed=embed, components=components)
 
         # send additional message for map generation
         button = create_button(
@@ -356,7 +363,7 @@ class Matchmaker(commands.Cog):
                 required=True
             ),
         ],
-        base_default_permission=False,
+        base_default_permission=False, # changes permissions for base command match
         base_permissions={
             bot_data['guild_id']: [
                 create_permission(bot_data['admin_id'], SlashCommandPermissionType.ROLE, True)
@@ -480,12 +487,6 @@ class Matchmaker(commands.Cog):
                 required=True
             ),
         ],
-        base_default_permission=False,
-        base_permissions={
-            bot_data['guild_id']: [
-                create_permission(bot_data['admin_id'], SlashCommandPermissionType.ROLE, True)
-            ]
-        },
         guild_ids=[bot_data['guild_id']]
     )
     async def create_test(self, ctx: SlashContext, player1, player2):
