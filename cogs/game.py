@@ -625,7 +625,7 @@ class Game(commands.Cog):
             else:
                 embed.title=f"A match issue has been reported in match #{id}."
                 embed.description="Any available admin please press the button below."
-                embed.set_author(name=ctx.author, icon_url=ctx.author.avatar_url)
+                embed.set_author(name=f"{ctx.author} (issue reporter)", icon_url=ctx.author.avatar_url)
 
                 assign_admin = create_button(
                     ButtonStyle.green,
@@ -641,14 +641,6 @@ class Game(commands.Cog):
 
         elif ctx.custom_id[:13] == "admin_assign_":
             id = int(ctx.custom_id[13:])
-            
-            embed = discord.Embed(
-                color = discord.Color.red(),
-                timestamp=datetime.utcnow(),
-                title=f"{ctx.author.name} has been assigned to this match.",
-            )
-            embed.set_author(name=f"{ctx.author} (admin)", icon_url=ctx.author.avatar_url)
-            asyncio.create_task(ctx.send(embed=embed))
 
             assign_admin = create_button(
                     ButtonStyle.green,
@@ -657,7 +649,20 @@ class Game(commands.Cog):
                 )
             components = spread_to_rows(assign_admin)
             asyncio.create_task(ctx.origin_message.edit(components=components))
-            
+
+            game = await self.bot.pg_con.fetchrow("SELECT id, game_active FROM games WHERE id = $1", id)
+            if not game['game_active']:
+                await ctx.send("This match has already ended.", hidden=True)
+                return
+
+            embed = discord.Embed(
+                color = discord.Color.red(),
+                timestamp=datetime.utcnow(),
+                title=f"{ctx.author.name} has been assigned to this match.",
+            )
+            embed.set_author(name=f"{ctx.author} (admin)", icon_url=ctx.author.avatar_url)
+            asyncio.create_task(ctx.send(embed=embed))
+
             category = discord.utils.get(ctx.guild.categories, name=f"match #{id}")
             for channel in category.text_channels:
                 await channel.set_permissions(ctx.author, view_channel=True)
