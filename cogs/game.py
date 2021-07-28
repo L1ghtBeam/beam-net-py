@@ -11,6 +11,8 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import json, logging, asyncio, pytz, random, os
 
+from typing import Union
+
 with open("bot.json", "r") as f:
     bot_data = json.load(f)
 
@@ -33,14 +35,12 @@ class Game(commands.Cog):
         self.close_games_loop.cancel()
 
 
-    async def send_match_result(self, player_id, old_rating, won, game, is_bravo):
+    async def send_match_result(self, player_id, old_rating, won, game, mode, match_draw, is_bravo):
         guild = discord.utils.get(self.bot.guilds, id=bot_data['guild_id'])
         member = discord.utils.get(guild.members, id=player_id)
         if not member:
             return
         
-        outcome = "won" if won else "lost"
-
         ratings = await self.bot.pg_con.fetchrow("SELECT user_id, mode, rating FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
         change = '{:.1f}'.format(ratings['rating'] - old_rating)
         if change[0] != "-":
@@ -57,14 +57,18 @@ class Game(commands.Cog):
         if is_bravo:
             alpha, bravo = bravo, alpha
 
-        mode = await self.bot.pg_con.fetchrow("SELECT name, internal_name, thumbnail FROM modes WHERE internal_name = $1", game['mode'])
-
         embed = discord.Embed(
             colour=discord.Color.blue(),
-            title=f"You {outcome} your match!",
             description=f"Match #{game['id']}",
             timestamp=datetime.utcnow()
         )
+
+        if not match_draw:
+            outcome = "won" if won else "lost"
+            embed.title=f"You {outcome} your match!"
+        else:
+            embed.title="The match was a draw."
+
         embed.set_author(name=member, icon_url=member.avatar_url)
         if mode['thumbnail']:
             embed.set_thumbnail(url=mode['thumbnail'])
@@ -82,9 +86,9 @@ class Game(commands.Cog):
     async def close_game(self, game):
         try:
             guild = discord.utils.get(self.bot.guilds, id=bot_data['guild_id'])
-
+            mode = await self.bot.pg_con.fetchrow("SELECT * FROM modes WHERE internal_name = $1", game['mode'])
+    
             # calculate score
-            # TODO: allow game to be tied or uncompleted
             alpha = 0
             bravo = 0
             for score in game['score']:
@@ -93,75 +97,83 @@ class Game(commands.Cog):
                 elif score == 2:
                     bravo += 1
             
+            if not mode['play_all_games']:
+                points_to_win = mode['games'] // 2 + 1
+                match_draw = alpha < points_to_win and bravo < points_to_win
+            else:
+                match_draw = alpha + bravo < mode['games']
+
             if alpha > bravo:
                 alpha_won = True
-            elif alpha < bravo:
+            elif bravo > alpha:
                 alpha_won = False
             else:
-                alpha_won = True # game tied but there is no code for that yet
+                alpha_won = True # this will do nothing if match_draw is true, but we still need to define it
+                match_draw = True
 
             # calculate ratings
-            alpha_ratings = 0
-            for rating in game['alpha_ratings']:
-                alpha_ratings += rating
+            if alpha + bravo != 0: # if no games were played, don't change any ratings
+                alpha_ratings = 0
+                for rating in game['alpha_ratings']:
+                    alpha_ratings += rating
 
-            bravo_ratings = 0
-            for rating in game['bravo_ratings']:
-                bravo_ratings += rating
+                bravo_ratings = 0
+                for rating in game['bravo_ratings']:
+                    bravo_ratings += rating
 
-            def get_rd_list(player_rd):
-                game_rd_list = []
-                for rd in game['alpha_deviations']:
-                    game_rd_list.append(rd)
-                for rd in game['bravo_deviations']:
-                    game_rd_list.append(rd)
+                def get_rd_list(player_rd):
+                    game_rd_list = []
+                    for rd in game['alpha_deviations']:
+                        game_rd_list.append(rd)
+                    for rd in game['bravo_deviations']:
+                        game_rd_list.append(rd)
 
-                game_rd_list.remove(player_rd)
-                return game_rd_list
+                    game_rd_list.remove(player_rd)
+                    return game_rd_list
 
-            for player_id in game['alpha_players']:
-                rating = await self.bot.pg_con.fetchrow("SELECT * FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
-                game_rd_list = get_rd_list(rating['deviation'])
-                if not (rating['rating_initial'] and rating['deviation_initial'] and rating['volatility_initial']):
-                    rating = await self.bot.pg_con.fetchrow(
-                        "UPDATE ratings SET rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility WHERE user_id = $1 AND mode = $2 RETURNING *",
-                        player_id, game['mode']
+                for player_id in game['alpha_players']:
+                    rating = await self.bot.pg_con.fetchrow("SELECT * FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
+                    game_rd_list = get_rd_list(rating['deviation'])
+                    if not (rating['rating_initial'] and rating['deviation_initial'] and rating['volatility_initial']):
+                        rating = await self.bot.pg_con.fetchrow(
+                            "UPDATE ratings SET rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility WHERE user_id = $1 AND mode = $2 RETURNING *",
+                            player_id, game['mode']
+                        )
+                    
+                    new_ratings, new_rds, new_outcomes = create_player(alpha_ratings - rating['rating'], bravo_ratings, game_rd_list, alpha, bravo)
+                    rating_list = rating['rating_list'] + new_ratings
+                    rd_list = rating['deviation_list'] + new_rds
+                    outcome_list = rating['outcome_list'] + new_outcomes
+
+                    glicko_player = Player(rating=rating['rating_initial'], rd=rating['deviation_initial'], vol=rating['volatility_initial'])
+                    glicko_player.update_player(rating_list, rd_list, outcome_list)
+
+                    await self.bot.pg_con.execute(
+                        "UPDATE ratings SET rating = $3, deviation = $4, volatility = $5, rating_list = $6, deviation_list = $7, outcome_list = $8 WHERE user_id = $1 AND mode = $2",
+                        player_id, game['mode'], glicko_player.rating, glicko_player.rd, glicko_player.vol, rating_list, rd_list, outcome_list
                     )
-                
-                new_ratings, new_rds, new_outcomes = create_player(alpha_ratings - rating['rating'], bravo_ratings, game_rd_list, alpha, bravo)
-                rating_list = rating['rating_list'] + new_ratings
-                rd_list = rating['deviation_list'] + new_rds
-                outcome_list = rating['outcome_list'] + new_outcomes
 
-                glicko_player = Player(rating=rating['rating_initial'], rd=rating['deviation_initial'], vol=rating['volatility_initial'])
-                glicko_player.update_player(rating_list, rd_list, outcome_list)
+                for player_id in game['bravo_players']:
+                    rating = await self.bot.pg_con.fetchrow("SELECT * FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
+                    game_rd_list = get_rd_list(rating['deviation'])
+                    if not (rating['rating_initial'] and rating['deviation_initial'] and rating['volatility_initial']):
+                        rating = await self.bot.pg_con.fetchrow(
+                            "UPDATE ratings SET rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility WHERE user_id = $1 AND mode = $2 RETURNING *",
+                            player_id, game['mode']
+                        )
+                    
+                    new_ratings, new_rds, new_outcomes = create_player(bravo_ratings - rating['rating'], alpha_ratings, game_rd_list, bravo, alpha)
+                    rating_list = rating['rating_list'] + new_ratings
+                    rd_list = rating['deviation_list'] + new_rds
+                    outcome_list = rating['outcome_list'] + new_outcomes
 
-                await self.bot.pg_con.execute(
-                    "UPDATE ratings SET rating = $3, deviation = $4, volatility = $5, rating_list = $6, deviation_list = $7, outcome_list = $8 WHERE user_id = $1 AND mode = $2",
-                    player_id, game['mode'], glicko_player.rating, glicko_player.rd, glicko_player.vol, rating_list, rd_list, outcome_list
-                )
+                    glicko_player = Player(rating=rating['rating_initial'], rd=rating['deviation_initial'], vol=rating['volatility_initial'])
+                    glicko_player.update_player(rating_list, rd_list, outcome_list)
 
-            for player_id in game['bravo_players']:
-                rating = await self.bot.pg_con.fetchrow("SELECT * FROM ratings WHERE user_id = $1 AND mode = $2", player_id, game['mode'])
-                game_rd_list = get_rd_list(rating['deviation'])
-                if not (rating['rating_initial'] and rating['deviation_initial'] and rating['volatility_initial']):
-                    rating = await self.bot.pg_con.fetchrow(
-                        "UPDATE ratings SET rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility WHERE user_id = $1 AND mode = $2 RETURNING *",
-                        player_id, game['mode']
+                    await self.bot.pg_con.execute(
+                        "UPDATE ratings SET rating = $3, deviation = $4, volatility = $5, rating_list = $6, deviation_list = $7, outcome_list = $8 WHERE user_id = $1 AND mode = $2",
+                        player_id, game['mode'], glicko_player.rating, glicko_player.rd, glicko_player.vol, rating_list, rd_list, outcome_list
                     )
-                
-                new_ratings, new_rds, new_outcomes = create_player(bravo_ratings - rating['rating'], alpha_ratings, game_rd_list, bravo, alpha)
-                rating_list = rating['rating_list'] + new_ratings
-                rd_list = rating['deviation_list'] + new_rds
-                outcome_list = rating['outcome_list'] + new_outcomes
-
-                glicko_player = Player(rating=rating['rating_initial'], rd=rating['deviation_initial'], vol=rating['volatility_initial'])
-                glicko_player.update_player(rating_list, rd_list, outcome_list)
-
-                await self.bot.pg_con.execute(
-                    "UPDATE ratings SET rating = $3, deviation = $4, volatility = $5, rating_list = $6, deviation_list = $7, outcome_list = $8 WHERE user_id = $1 AND mode = $2",
-                    player_id, game['mode'], glicko_player.rating, glicko_player.rd, glicko_player.vol, rating_list, rd_list, outcome_list
-                )
 
             # mark game as closed
             await self.bot.pg_con.execute(
@@ -183,12 +195,12 @@ class Game(commands.Cog):
             # send messages
             i = 0
             for player_id in game['alpha_players']:
-                asyncio.create_task(self.send_match_result(player_id, game['alpha_ratings'][i], alpha_won, game, False))
+                asyncio.create_task(self.send_match_result(player_id, game['alpha_ratings'][i], alpha_won, game, mode, match_draw, False))
                 i += 1
             
             i = 0
             for player_id in game['bravo_players']:
-                asyncio.create_task(self.send_match_result(player_id, game['bravo_ratings'][i], not alpha_won, game, True))
+                asyncio.create_task(self.send_match_result(player_id, game['bravo_ratings'][i], not alpha_won, game, mode, match_draw, True))
                 i += 1
         
         except Exception as error:
@@ -383,6 +395,64 @@ class Game(commands.Cog):
         return True
 
 
+    async def submit_score(self, ctx: Union[SlashContext, ComponentContext], id: int):
+        game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+        if not await self.can_change_score(ctx, game):
+                return
+            
+        submit_time = pytz.utc.localize(datetime.utcnow())+relativedelta(seconds=+30)
+        await self.bot.pg_con.execute(
+            "UPDATE games SET submit_time = $2 WHERE id = $1",
+            game['id'], submit_time
+        )
+
+        alpha = 0
+        bravo = 0
+        for score in game['score']:
+            if score == 1:
+                alpha += 1
+            elif score == 2:
+                bravo += 1
+
+        if game['admin_locked']:
+            extra_info=""
+            title = "(admin)"
+            components=None
+        else:
+            extra_info = " unless a match issue is reported"
+            title = "(host)"
+            match_issue = create_button(
+                ButtonStyle.red,
+                label="Report Match Issue",
+                custom_id=f"match_issue_{game['id']}"
+            )
+            components = spread_to_rows(match_issue)
+
+        embed = discord.Embed(
+            colour = discord.Colour.blue(),
+            timestamp=datetime.utcnow(),
+            title=f"The score has been submitted as Alpha {alpha} - {bravo} Bravo",
+            description=f"The match will be automatically closed in 30 seconds{extra_info}."
+        )
+        embed.set_author(
+            name=f"{ctx.author} {title}",
+            icon_url=ctx.author.avatar_url
+        )
+
+        content = ""
+        for player_id in game['alpha_players']:
+            member = discord.utils.get(ctx.guild.members, id=player_id)
+            if member:
+                content += member.mention + " "
+        for player_id in game['bravo_players']:
+            member = discord.utils.get(ctx.guild.members, id=player_id)
+            if member:
+                content += member.mention + " "
+
+        asyncio.create_task(ctx.send("You submitted the score.", hidden=True))
+        await ctx.channel.send(content=content[:-1], embed=embed, components=components)
+
+
     @cog_ext.cog_subcommand(
         base="match",
         name="unlock",
@@ -418,6 +488,22 @@ class Game(commands.Cog):
 
         for channel in category.channels:
             await channel.set_permissions(ctx.author, overwrite=None)
+
+
+    @cog_ext.cog_subcommand(
+        base="match",
+        name="submit",
+        description="Submit the score for the current match. Useful for submitting the match as a draw.",
+        guild_ids=[bot_data['guild_id']]
+    )
+    async def submit(self, ctx: SlashContext):
+        category = ctx.channel.category
+        if category.name[:7] != "match #":
+            await ctx.send("Can't use this command here!", hidden=True)
+            return
+        id = int(category.name[7:])
+
+        await self.submit_score(ctx, id)
 
 
     @cog_ext.cog_subcommand(
@@ -509,57 +595,7 @@ class Game(commands.Cog):
         
         elif ctx.custom_id[:13] == "submit_score_":
             id = int(ctx.custom_id[13:])
-            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
-            
-            if not await self.can_change_score(ctx, game):
-                return
-            
-            submit_time = pytz.utc.localize(datetime.utcnow())+relativedelta(seconds=+30)
-            await self.bot.pg_con.execute(
-                "UPDATE games SET submit_time = $2 WHERE id = $1",
-                id, submit_time
-            )
-
-            alpha = 0
-            bravo = 0
-            for score in game['score']:
-                if score == 1:
-                    alpha += 1
-                elif score == 2:
-                    bravo += 1
-
-            embed = discord.Embed(
-                colour = discord.Colour.blue(),
-                timestamp=datetime.utcnow(),
-                title=f"The score has been submitted as Alpha {alpha} - {bravo} Bravo",
-                description="The match will be automatically closed in 30 seconds unless a match issue is reported."
-            )
-            title = "(admin)" if game['admin_locked'] else "(host)"
-            embed.set_author(
-                name=f"{ctx.author} {title}",
-                icon_url=ctx.author.avatar_url
-            )
-
-            content = ""
-            for player_id in game['alpha_players']:
-                member = discord.utils.get(ctx.guild.members, id=player_id)
-                if member:
-                    content += member.mention + " "
-            for player_id in game['bravo_players']:
-                member = discord.utils.get(ctx.guild.members, id=player_id)
-                if member:
-                    content += member.mention + " "
-
-            await ctx.send("You submitted the score.", hidden=True)
-
-            match_issue = create_button(
-                ButtonStyle.red,
-                label="Report Match Issue",
-                custom_id=f"match_issue_{id}"
-            )
-            components = spread_to_rows(match_issue)
-
-            await ctx.channel.send(content=content[:-1], embed=embed, components=components)
+            await self.submit_score(ctx, id)
         
         elif ctx.custom_id[:12] == "match_issue_":
             id = int(ctx.custom_id[12:])
