@@ -243,16 +243,16 @@ class Matchmaker(commands.Cog):
             await self.bot.pg_con.execute("UPDATE users SET last_played = $2 WHERE user_id = $1", player.id, now)
         
         # move players to vc
+        async def try_move(player, channel):
+            try:
+                await player.move_to(channel)
+            except HTTPException:
+                pass
+        
         for player in alpha:
-            try:
-                asyncio.create_task(await player.move_to(channels[3]))
-            except HTTPException:
-                pass
+                asyncio.create_task(try_move(player, channels[3]))
         for player in bravo:
-            try:
-                await asyncio.create_task(player.move_to(channels[4]))
-            except HTTPException:
-                pass
+                asyncio.create_task(try_move(player, channels[4]))
 
 
     # Alpha are the first 4 players, Bravo are the last 4
