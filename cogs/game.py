@@ -417,7 +417,12 @@ class Game(commands.Cog):
         if game['admin_locked']:
             extra_info=""
             title = "(admin)"
-            components=None
+            cancel_submit = create_button(
+                ButtonStyle.red,
+                label="Cancel",
+                custom_id=f"cancel_submit_{game['id']}"
+            )
+            components = spread_to_rows(cancel_submit)
         else:
             extra_info = " unless a match issue is reported"
             title = "(host)"
@@ -455,11 +460,11 @@ class Game(commands.Cog):
 
     @cog_ext.cog_subcommand(
         base="match",
-        name="unlock",
+        name="resolve",
         description="Unlock a match once a match issue has been resolved.",
         guild_ids=[bot_data['guild_id']]
     )
-    async def unlock(self, ctx: SlashContext):
+    async def resolve(self, ctx: SlashContext):
         category = ctx.channel.category
         if category.name[:7] != "match #":
             await ctx.send("Can't use this command here!", hidden=True)
@@ -501,8 +506,13 @@ class Game(commands.Cog):
         if category.name[:7] != "match #":
             await ctx.send("Can't use this command here!", hidden=True)
             return
-        id = int(category.name[7:])
+        
+        match_chat = category.text_channels[0]
+        if ctx.channel != match_chat:
+            await ctx.send(f"Please use this command in {match_chat.mention}.", hidden=True)
+            return
 
+        id = int(category.name[7:])
         await self.submit_score(ctx, id)
 
 
@@ -670,6 +680,47 @@ class Game(commands.Cog):
                 await channel.set_permissions(ctx.author, view_channel=True, connect=True)
             
             await category.text_channels[0].send(content=ctx.author.mention, embed=embed)
+    
+        elif ctx.custom_id[:14] == "cancel_submit_":
+            id = int(ctx.custom_id[14:])
+
+            role = discord.utils.get(ctx.guild.roles, id=bot_data['admin_id'])
+            if not role in ctx.author.roles:
+                await ctx.send("Only an admin can do this action!", hidden=True)
+                return False
+            
+            # disable button
+            cancel_submit = create_button(
+                ButtonStyle.red,
+                label="Cancel",
+                disabled=True
+            )
+            components = spread_to_rows(cancel_submit)
+            asyncio.create_task(ctx.origin_message.edit(components=components))
+
+            game = await self.bot.pg_con.fetchrow("SELECT * FROM games WHERE id = $1", id)
+            if not game['submit_time']:
+                asyncio.create_task(ctx.send("The score is not submitted.", hidden=True))
+                return
+
+            now = pytz.utc.localize(datetime.utcnow())
+            if game['submit_time'] <= now:
+                await ctx.send("The match has already been submitted!", hidden=True)
+                return
+            
+            await self.bot.pg_con.execute("UPDATE games SET submit_time = null WHERE id = $1", id)
+
+            embed = discord.Embed(
+                colour = discord.Colour.red(),
+                timestamp=datetime.utcnow(),
+                title="Score submission has been cancelled.",
+            )
+            embed.set_author(
+                name=f"{ctx.author} (admin)",
+                icon_url=ctx.author.avatar_url
+            )
+            await ctx.send(embed=embed)
+            
             
             
 def setup(bot):
