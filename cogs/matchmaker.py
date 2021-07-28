@@ -1,4 +1,5 @@
 import discord
+from discord.errors import HTTPException
 from discord.ext import commands
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
@@ -233,15 +234,25 @@ class Matchmaker(commands.Cog):
         msg2 = await channels[0].send(embed=embed, components=components)
 
         # pin messages
-        await asyncio.gather(
-            msg2.pin(),
-            msg1.pin()
-        )
+        asyncio.create_task(msg2.pin())
+        asyncio.create_task(msg1.pin())
 
         # mark all players as last played on this date
         now = pytz.utc.localize(datetime.utcnow())
         for player in players:
             await self.bot.pg_con.execute("UPDATE users SET last_played = $2 WHERE user_id = $1", player.id, now)
+        
+        # move players to vc
+        for player in alpha:
+            try:
+                asyncio.create_task(await player.move_to(channels[3]))
+            except HTTPException:
+                pass
+        for player in bravo:
+            try:
+                await asyncio.create_task(player.move_to(channels[4]))
+            except HTTPException:
+                pass
 
 
     # Alpha are the first 4 players, Bravo are the last 4
