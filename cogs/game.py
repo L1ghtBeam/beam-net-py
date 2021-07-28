@@ -387,12 +387,6 @@ class Game(commands.Cog):
         base="match",
         name="unlock",
         description="Unlock a match once a match issue has been resolved.",
-        base_default_permission=False, # changes permissions for base command match
-        base_permissions={
-            bot_data['guild_id']: [
-                create_permission(bot_data['admin_id'], SlashCommandPermissionType.ROLE, True)
-            ]
-        },
         guild_ids=[bot_data['guild_id']]
     )
     async def unlock(self, ctx: SlashContext):
@@ -425,7 +419,46 @@ class Game(commands.Cog):
         for channel in category.channels:
             await channel.set_permissions(ctx.author, overwrite=None)
 
-    
+
+    @cog_ext.cog_subcommand(
+        base="match",
+        name="delete",
+        description="Deletes a game and its discord channels. DO NOT USE THIS unless you have a good reason to do so.",
+        options=[
+            create_option(
+                name="match_id",
+                description="ID number of the match.",
+                option_type=SlashCommandOptionType.INTEGER,
+                required=True
+            )
+        ],
+        base_default_permission=False, # changes permissions for base command match
+        base_permissions={
+            bot_data['guild_id']: [
+                create_permission(bot_data['admin_id'], SlashCommandPermissionType.ROLE, True)
+            ]
+        },
+        guild_ids=[bot_data['guild_id']]
+    )
+    async def delete(self, ctx: SlashContext, match_id: int):
+        category = discord.utils.get(ctx.guild.channels, name=f'match #{match_id}')
+        reason = f"{ctx.author} used /match delete for match #{match_id}"
+        logging.info(reason)
+
+        asyncio.create_task(self.bot.pg_con.execute("DELETE FROM games WHERE id = $1", match_id))
+
+        if category:
+            coroutines = []
+            for channel in category.channels:
+                coroutines.append(
+                    channel.delete(reason=reason)
+                )
+            await asyncio.gather(*coroutines)
+            await category.delete(reason=reason)
+
+        await ctx.send("Delete successful!")
+
+
     @commands.Cog.listener()
     async def on_component(self, ctx: ComponentContext):
         if ctx.custom_id[:14] == "generate_maps_":
