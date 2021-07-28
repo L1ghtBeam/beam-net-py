@@ -476,9 +476,9 @@ class Game(commands.Cog):
             return
 
         id = int(category.name[7:])
-        game = await self.bot.pg_con.fetchrow("SELECT id, admin_locked FROM games WHERE id = $1", id)
+        game = await self.bot.pg_con.fetchrow("SELECT id, admin_locked, alpha_players, bravo_players FROM games WHERE id = $1", id)
         if not game['admin_locked']:
-            await ctx.send("This match is not locked.", hidden=True)
+            await ctx.send("This match has already been resolved.", hidden=True)
             return
 
         embed = discord.Embed(
@@ -491,8 +491,16 @@ class Game(commands.Cog):
         asyncio.create_task(ctx.send(embed=embed))
         await self.bot.pg_con.execute("UPDATE games SET admin_locked = false WHERE id = $1", id)
 
-        for channel in category.channels:
-            await channel.set_permissions(ctx.author, overwrite=None)
+        # only remove the admin from channels they shouldn't be in
+        channels = category.channels
+        if not (ctx.author_id in game['alpha_players'] or ctx.author_id in game['bravo_players']):
+            asyncio.create_task(channels[0].set_permissions(ctx.author, overwrite=None))
+        if not ctx.author_id in game['alpha_players']:
+            asyncio.create_task(channels[1].set_permissions(ctx.author, overwrite=None))
+            asyncio.create_task(channels[3].set_permissions(ctx.author, overwrite=None))
+        if not ctx.author_id in game['bravo_players']:
+            asyncio.create_task(channels[2].set_permissions(ctx.author, overwrite=None))
+            asyncio.create_task(channels[4].set_permissions(ctx.author, overwrite=None))
 
 
     @cog_ext.cog_subcommand(
@@ -674,11 +682,15 @@ class Game(commands.Cog):
             asyncio.create_task(ctx.send(embed=embed))
 
             category = discord.utils.get(ctx.guild.categories, name=f"match #{id}")
-            for channel in category.text_channels:
-                await channel.set_permissions(ctx.author, view_channel=True)
-            for channel in category.voice_channels:
-                await channel.set_permissions(ctx.author, view_channel=True, connect=True)
             
+            # add the admin user to all match channels
+            coroutines = []
+            for channel in category.text_channels:
+                coroutines.append(channel.set_permissions(ctx.author, view_channel=True))
+            for channel in category.voice_channels:
+                coroutines.append(channel.set_permissions(ctx.author, view_channel=True, connect=True))
+            await asyncio.gather(*coroutines)
+
             await category.text_channels[0].send(content=ctx.author.mention, embed=embed)
     
         elif ctx.custom_id[:14] == "cancel_submit_":
