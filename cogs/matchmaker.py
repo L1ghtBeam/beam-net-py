@@ -328,6 +328,7 @@ class Matchmaker(commands.Cog):
 
     @tasks.loop(seconds=1)
     async def matchmaker(self):
+        return
         guild = discord.utils.get(self.bot.guilds, id=bot_data['guild_id'])
 
         if datetime.utcnow() > self.next_mode_cache:
@@ -350,7 +351,7 @@ class Matchmaker(commands.Cog):
         logging.info("Starting matchmaker")
     
 
-    @matchmaker.error()
+    @matchmaker.error
     async def matchmaker_error(self, error):
         logging.exception("Matchmaker error!", exc_info=error)
         logging.error("Attempting to restart matchmaker in 2 minutes.")
