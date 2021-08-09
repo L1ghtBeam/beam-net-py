@@ -42,6 +42,15 @@ class Modes(commands.Cog):
         return content
 
 
+    def elapsed_time(self, time):
+        now = pytz.utc.localize(datetime.utcnow())
+        time = (now - time).seconds
+
+        minutes = str(time // 60).zfill(2)
+        seconds = str(time % 60).zfill(2)
+        return f"{minutes}:{seconds}"
+
+
     @tasks.loop(seconds=15.0)
     async def update_modes(self):
         channel = discord.utils.get(self.bot.get_all_channels(), guild__id=bot_data['guild_id'], name='modes')
@@ -259,30 +268,27 @@ class Modes(commands.Cog):
     @cog_ext.cog_component()
     async def show_queue(self, ctx: ComponentContext):
         queue = await self.bot.pg_con.fetchrow(
-            "SELECT modes, player_ids FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+            "SELECT modes, player_ids, join_date FROM queue WHERE $1 = ANY (player_ids::bigint[])",
             ctx.author_id
         )
         if not queue:
             await ctx.send(f"You are not in the queue.", hidden=True)
         else:
             modes = await self.bot.pg_con.fetch("SELECT internal_name, name, emoji_id FROM modes WHERE internal_name = ANY ($1::varchar[]);", queue['modes'])
-            content = f"You are currently in queue for: **{self.list_modes(queue['modes'], modes)}**"
+            content = f"You are currently in queue for: **{self.list_modes(queue['modes'], modes)}**\nElapsed time: `{self.elapsed_time(queue['join_date'])}`"
             await ctx.send(content=content, hidden=True)
     
 
     @cog_ext.cog_component()
     async def leave_queue(self, ctx: ComponentContext):
-        result = await self.bot.pg_con.execute( # TODO: only allow the party leader to leave
-            "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[])",
+        result = await self.bot.pg_con.fetchrow( # TODO: only allow the party leader to leave
+            "DELETE FROM queue WHERE $1 = ANY (player_ids::bigint[]) RETURNING *",
             ctx.author_id
         )
-        if result == "DELETE 1":
-            await ctx.send(f"You left the queue!", hidden=True)
-        elif result == "DELETE 0":
-            await ctx.send(f"You are not in the queue.", hidden=True)
+        if result:
+            await ctx.send(f"You left the queue!\nElapsed time: `{self.elapsed_time(result['join_date'])}`", hidden=True)
         else:
-            logging.error(f"Result \"{result}\" received when leaving the queue!")
-            await ctx.send(f"You left the queue!", hidden=True)
+            await ctx.send(f"You are not in the queue.", hidden=True)
 
 
 def setup(bot):
