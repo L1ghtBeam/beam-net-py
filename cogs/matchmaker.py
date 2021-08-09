@@ -1,6 +1,6 @@
 import discord
 from discord.errors import HTTPException
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord_slash import cog_ext, SlashContext, ComponentContext
 from discord_slash.utils.manage_commands import create_option, SlashCommandOptionType, create_permission
 from discord_slash.utils.manage_components import create_select, create_select_option, spread_to_rows, create_button, wait_for_component
@@ -13,11 +13,17 @@ import json, logging, asyncio, pytz
 with open("bot.json", "r") as f:
     bot_data = json.load(f)
 
+MODE_CACHE_SECONDS = 10
+
 
 class Matchmaker(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.matchmaker.start()
+
+    def cog_unload(self):
+        self.matchmaker.cancel()
 
 
     async def send_ready_message(self, player: discord.User, mode):
@@ -318,6 +324,38 @@ class Matchmaker(commands.Cog):
         except Exception as error:
             logging.exception("Create match error!", exc_info=error)
             return
+
+
+    @tasks.loop(seconds=1)
+    async def matchmaker(self):
+        guild = discord.utils.get(self.bot.guilds, id=bot_data['guild_id'])
+
+        if datetime.utcnow() > self.next_mode_cache:
+            modes = await self.bot.pg_con.fetch("SELECT internal_name FROM modes WHERE status = 1")
+            self.modes_cache = []
+            for mode in modes:
+                self.modes_cache.append(mode['internal_name'])
+            self.next_mode_cache = datetime.utcnow()+relativedelta(seconds=MODE_CACHE_SECONDS)
+
+        all_groups = await self.bot.pg_con.fetch("SELECT * FROM queue")
+        for mode in self.modes_cache:
+            pass # TODO: finish the matchmaker here
+
+
+    @matchmaker.before_loop
+    async def before_matchmaker(self):
+        await self.bot.wait_until_ready()
+        self.modes_cache = []
+        self.next_mode_cache = datetime.utcnow()
+        logging.info("Starting matchmaker")
+    
+
+    @matchmaker.error()
+    async def matchmaker_error(self, error):
+        logging.exception("Matchmaker error!", exc_info=error)
+        logging.error("Attempting to restart matchmaker in 2 minutes.")
+        await asyncio.sleep(120)
+        self.matchmaker.start()
 
 
     @cog_ext.cog_subcommand(
