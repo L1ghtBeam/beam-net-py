@@ -34,28 +34,32 @@ class Rating(commands.Cog):
                 logging.warning(f"Automatically set the last_rating_period of mode \"{mode['internal_name']}\" to \"{date}\". It is recommended to change this date so the rating period is changed on the hour or on the day.")
                 continue
             
-            next_rating_period = mode['last_rating_period']+relativedelta(hours=mode['rating_period_hours'])
-            if now >= next_rating_period:
-                logging.info(f"Advancing rating period for mode \"{mode['internal_name']}\".")
-                players = await self.bot.pg_con.fetch( # get all players who did not play in the period
-                    "SELECT * FROM ratings WHERE mode = $1 AND (rating_list = '{}' OR deviation_list = '{}' or outcome_list = '{}')",
-                    mode['internal_name']
-                )
-                for player in players:
-                    glicko_player = Player(rating=player['rating'], rd=player['deviation'], vol=player['volatility'])
-                    glicko_player.did_not_compete()
-                    rd = min(glicko_player.rd, 350)
-                    await self.bot.pg_con.execute(
-                        "UPDATE ratings SET rating = $3, deviation = $4, volatility = $5 WHERE user_id = $1 AND mode = $2",
-                        player['user_id'], player['mode'], glicko_player.rating, rd, glicko_player.vol
+            for i in range(30): # this is a loop so missed days can be advanced quickly, limit to 30 so it doesn't infinite loop
+                next_rating_period = mode['last_rating_period']+relativedelta(hours=mode['rating_period_hours'])
+                if now >= next_rating_period:
+                    logging.info(f"Advancing rating period for mode \"{mode['internal_name']}\".")
+                    players = await self.bot.pg_con.fetch( # get all players who did not play in the period
+                        "SELECT * FROM ratings WHERE mode = $1 AND (rating_list = '{}' OR deviation_list = '{}' or outcome_list = '{}')",
+                        mode['internal_name']
                     )
-                await self.bot.pg_con.execute(
-                    "UPDATE ratings SET rating_list = '{}', deviation_list = '{}', outcome_list = '{}', rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility"
-                )
-                await self.bot.pg_con.execute(
-                    "UPDATE modes SET last_rating_period = $2 WHERE internal_name = $1",
-                    mode['internal_name'], next_rating_period
-                )
+                    for player in players:
+                        glicko_player = Player(rating=player['rating'], rd=player['deviation'], vol=player['volatility'])
+                        glicko_player.did_not_compete()
+                        rd = min(glicko_player.rd, 350)
+                        await self.bot.pg_con.execute(
+                            "UPDATE ratings SET rating = $3, deviation = $4, volatility = $5 WHERE user_id = $1 AND mode = $2",
+                            player['user_id'], player['mode'], glicko_player.rating, rd, glicko_player.vol
+                        )
+                    await self.bot.pg_con.execute(
+                        "UPDATE ratings SET rating_list = '{}', deviation_list = '{}', outcome_list = '{}', rating_initial = rating, deviation_initial = deviation, volatility_initial = volatility"
+                    )
+                    mode = await self.bot.pg_con.fetchrow(
+                        "UPDATE modes SET last_rating_period = $2 WHERE internal_name = $1 RETURNING internal_name, last_rating_period, rating_period_hours",
+                        mode['internal_name'], next_rating_period
+                    )
+                else:
+                    break
+
 
     @manage_rating_periods.before_loop
     async def before_manage_rating_periods(self):
