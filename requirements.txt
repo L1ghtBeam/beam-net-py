@@ -1,0 +1,6 @@
+asyncpg==0.23.0
+discord-py-slash-command==2.4.2
+discord.py==1.7.3
+glicko2==2.1.0
+python-dateutil==2.9.0.post0
+pytz==2026.1.post1

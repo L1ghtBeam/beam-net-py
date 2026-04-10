@@ -1,0 +1,11 @@
+{
+  "address": "<db ip>",
+  "port": <db port>,
+  "name": "<postgres database name>",
+  "pass": "<postgres password>",
+  "token": "<discord token>",
+  "guild_id": <discord guild id>,
+  "admin_id": <discord admin role id>,
+  "registered_id": <discord registered role id>,
+  "timezone": "<server timezone>"
+}
