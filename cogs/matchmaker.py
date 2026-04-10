@@ -549,11 +549,12 @@ class Matchmaker(commands.Cog):
                     return
         
         # mode select
-        modes = await self.bot.pg_con.fetch("SELECT name, internal_name FROM modes ORDER BY sort_order ASC")
+        modes = await self.bot.pg_con.fetch("SELECT name, internal_name, emoji_id FROM modes ORDER BY sort_order ASC")
 
         options = []
         for mode in modes:
-            options.append(create_select_option(label=mode['name'], value=mode['internal_name']))
+            emoji = self.bot.get_emoji(mode['emoji_id']) if mode['emoji_id'] else None
+            options.append(create_select_option(label=mode['name'], value=mode['internal_name'], emoji=emoji))
         
         mode_select = create_select(
             options=options,

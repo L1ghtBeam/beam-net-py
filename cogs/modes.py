@@ -1,3 +1,5 @@
+from operator import truediv
+
 import discord
 from discord.ext import commands, tasks
 from discord.mentions import AllowedMentions
@@ -224,6 +226,12 @@ class Modes(commands.Cog):
                 "SELECT user_id, queue_disable_time FROM users WHERE user_id = $1",
                 ctx.author_id
             )
+
+            # prevent unregistered users from entering queue
+            if user is None:
+                await ctx.send(f"**You must register before entering a queue.**", hidden=True)
+                return
+
             if user['queue_disable_time']:
                 if pytz.utc.localize(datetime.utcnow()) < user['queue_disable_time']:
                     await ctx.send("You cannot join the queue at this time!", hidden=True)
